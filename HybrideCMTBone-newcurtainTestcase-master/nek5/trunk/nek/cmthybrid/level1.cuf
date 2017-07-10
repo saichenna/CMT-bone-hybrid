@@ -1,0 +1,1662 @@
+!-----------------------------------------------------------------------
+!     added by keke of module, for global variables
+      module glbvariable
+       
+      include 'SIZE.cuf'
+      include 'CMTPART.cuf'
+!     parameter (lr=16*ldim,li=5+6)
+      real, device :: d_rpart(lr,llpart)
+      integer, device :: d_ipart(li,llpart)
+      real, device :: d_phig(lx1,ly1,lz1,lelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+
+      end module
+!-----------------------------------------------------------------------
+      subroutine nek_solve_gpu
+
+      use cudafor
+      use glbvariable
+!     include 'SIZE.cuf'
+      include 'TSTEP.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+
+      real*4 papi_mflops
+      integer*8 papi_flops
+      integer modstep
+      common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+      integer gfirst, inoassignd, resetFindpts, pload
+      integer reinit_step  !added by keke
+      integer counter !added by keke
+      integer last_kstep !added by keke
+      real diff_time !added by keke
+
+      integer lfq,heresize,hdsize
+      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
+      parameter (lfq=lx1*lz1*2*ldim*lelcmt, &
+                        heresize=nqq*3*lfq, &
+                        hdsize=toteq*ldim*lfq)
+!     parameter (lr=14*ldim+2,li=5+1)
+!     parameter (lr=16*ldim,li=5+6)
+!     parameter (lrf=4+ldim,lif=5+5)
+
+!     real               rfpts(lrf,lpart)
+!     common /fptspartr/ rfpts
+!     integer            ifpts(lif,lpart),fptsmap(lpart)
+!     common /fptsparti/ ifpts,fptsmap
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+!     common /gpuvariables/ d_phig(lx1,ly1,lz1,lelt)
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+!     common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 16*ndim
+!     common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+!     common  /iparti/ n,nr,ni
+
+      real, device :: d_xdrange(2,3)
+      real, device :: d_xerange(2,3,lelt)
+!     real, device :: d_rpart(lr,lpart)
+!     integer, device :: d_ipart(li,lpart)
+      integer, device :: d_fptsmap(lpart)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)	
+
+      real, device :: d_res3(lx1,ly1,lz1,toteq,lelt)
+!     real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_res1(lx1,ly1,lz1,lelt,toteq)
+      real, device :: d_bm1(lx1,ly1,lz1,lelt)
+      real, device :: d_tcoef(3,3)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_flux(nqq*3*lx1*lz1*2*ldim*lelt)
+      real, device :: d_w(lelt*lwkd)
+      real, device :: d_vx(lx1,ly1,lz1,lelt)
+      real, device :: d_vy(lx1,ly1,lz1,lelt)
+      real, device :: d_vz(lx1,ly1,lz1,lelt)
+      real, device :: d_vxd(lxd,lyd,lzd,lelt)
+      real, device :: d_vyd(lxd,lyd,lzd,lelt)
+      real, device :: d_vzd(lxd,lyd,lzd,lelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,lelt)
+      real, device :: d_pr(lx1,ly1,lz1,lelt)
+      real, device :: d_area(lx1,lz1,6,lelt)
+      !real, device :: d_phig(lx1,ly1,lz1,lelt)
+!     real, device :: d_phig
+      real, device :: d_iface_flux(lx1*lz1*6,lelt)
+      real, device :: d_totalh(lelt*3*lxd*lyd*lzd)
+      real, device :: d_ur(lelt*lxd*lyd*lzd)
+      real, device :: d_us(lelt*lxd*lyd*lzd)
+      real, device :: d_ut(lelt*lxd*lyd*lzd)
+      real, device :: d_ud(lelt*lxd*lyd*lzd)
+      real, device :: d_tu(lelt*lxd*lyd*lzd)
+      real, device :: d_rx(lxd*lyd*lzd,9,lelt)
+      real, device :: d_dg(lxd*lyd*lzd)
+      real, device :: d_dgt(lxd*lyd*lzd)
+      real, device :: d_d(lxd*lyd*lzd)
+      real, device :: d_dt(lxd*lyd*lzd)
+      real, device :: d_jacmi(lx1*ly1*lz1,lelt)
+      real, device :: d_usrf(lx1,ly1,lz1,toteq)
+!      real, device :: d_vols(lx1,ly1,lz1,lelt,5)
+      real, device :: d_wghtc(lx1*lz1)
+      real, device :: d_wghtf(lxd*lzd)
+      real, device :: d_unx(lx1,lz1,6,lelt)
+      real, device :: d_uny(lx1,lz1,6,lelt)
+      real, device :: d_unz(lx1,lz1,6,lelt)
+      real, device :: d_cbc(lx1,lz1)
+      real, device :: d_all(lelt*6*lxd*lzd,26)
+      real, device :: d_jaco_c(lelt*6*lx1*lz1)
+
+!------------------------------------------------------------
+!     the following is the copy of the previous to keep original one before change 
+!       real, device :: d_res3(lx1,ly1,lz1,toteq,nelt)
+!!     real, device :: d_u(lx1,ly1,lz1,toteq,nelt)
+!      real, device :: d_res1(lx1,ly1,lz1,nelt,toteq)
+!      real, device :: d_bm1(lx1,ly1,lz1,nelt)
+!      real, device :: d_tcoef(3,3)
+!      real, device :: d_jgl(ldg)
+!      real, device :: d_jgt(ldg)
+!      real, device :: d_flux(nqq*3*lx1*lz1*2*ldim*nelt)
+!      real, device :: d_w(nelt*lwkd)
+!      real, device :: d_vx(lx1,ly1,lz1,nelt)
+!      real, device :: d_vy(lx1,ly1,lz1,nelt)
+!      real, device :: d_vz(lx1,ly1,lz1,nelt)
+!      real, device :: d_vxd(lxd,lyd,lzd,nelt)
+!      real, device :: d_vyd(lxd,lyd,lzd,nelt)
+!      real, device :: d_vzd(lxd,lyd,lzd,nelt)
+!      real, device :: d_vtrans(lx1,ly1,lz1,nelt)
+!      real, device :: d_pr(lx1,ly1,lz1,nelt)
+!      real, device :: d_area(lx1,lz1,6,nelt)
+!      !real, device :: d_phig(lx1,ly1,lz1,nelt)
+!!     real, device :: d_phig
+!      real, device :: d_iface_flux(lx1*lz1*6,nelt)
+!      real, device :: d_totalh(nelt*3*lxd*lyd*lzd)
+!      real, device :: d_ur(nelt*lxd*lyd*lzd)
+!      real, device :: d_us(nelt*lxd*lyd*lzd)
+!      real, device :: d_ut(nelt*lxd*lyd*lzd)
+!      real, device :: d_ud(nelt*lxd*lyd*lzd)
+!      real, device :: d_tu(nelt*lxd*lyd*lzd)
+!      real, device :: d_rx(lxd*lyd*lzd,9,nelt)
+!      real, device :: d_dg(lxd*lyd*lzd)
+!      real, device :: d_dgt(lxd*lyd*lzd)
+!      real, device :: d_d(lxd*lyd*lzd)
+!      real, device :: d_dt(lxd*lyd*lzd)
+!      real, device :: d_jacmi(lx1*ly1*lz1,nelt)
+!      real, device :: d_usrf(lx1,ly1,lz1,toteq)
+!!      real, device :: d_vols(lx1,ly1,lz1,nelt,5)
+!      real, device :: d_wghtc(lx1*lz1)
+!      real, device :: d_wghtf(lxd*lzd)
+!      real, device :: d_unx(lx1,lz1,6,nelt)
+!      real, device :: d_uny(lx1,lz1,6,nelt)
+!      real, device :: d_unz(lx1,lz1,6,nelt)
+!      real, device :: d_cbc(lx1,lz1)
+!      real, device :: d_all(nelt*6*lxd*lzd,26)
+!      real, device :: d_jaco_c(nelt*6*lx1*lz1)
+!---------------------------------------------------------------------
+!      print *,'nelt:',nelt
+      call nekgsync()
+      reinit_step=0
+      diff_time = 0.0
+      counter = 0
+      last_kstep = 0
+
+      if (instep.eq.0) then
+        if(nid.eq.0) write(6,'(/,A,/,A,/)') &
+                        ' nsteps=0 -> skip time loop',&
+                        ' running solver in post processing mode'
+      else
+        if(nio.eq.0) write(6,'(/,A,/)') 'Starting time loop ...'
+      endif
+
+      isyc  = 0
+      itime = 0
+      if(ifsync) isyc=1
+      itime = 1
+      call nek_comm_settings(isyc,itime)
+
+      call nek_comm_startstat()
+
+      istep  = 0
+      msteps = 1
+
+      istate = cudaMemcpy(d_xerange,xerange,6*nelt,cudaMemcpyHosttoDevice)
+      istate = cudaMemcpy(d_xdrange,xdrange,6,cudaMemcpyHosttoDevice)
+      istate = cudaMemcpy(d_rpart,rpart,lpart*lr,cudaMemcpyHosttoDevice)
+      istate = cudaMemcpy(d_ipart,ipart,lpart*li,cudaMemcpyHosttoDevice)
+      !istate = cudaMemcpy(ifpts,d_ifpts,lif*n, cudaMemcpyDevicetoHost)
+      !istate = cudaMemcpy(rfpts,d_rfpts,lrf*n, cudaMemcpyDevicetoHost)
+      !istate = cudaMemcpy(fptsmap,d_fptsmap,n, cudaMemcpyDevicetoHost)
+
+      do kstep=1,nsteps,msteps
+         call nek__multi_advance_gpu(kstep,msteps,d_res3,d_u,d_res1,&
+                        d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+                        d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+                        d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
+                        d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+                        d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+         call process_gpu_particles(d_xdrange,d_xerange,d_rpart,d_ipart,&
+                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
+                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
+         call prepost (.false.,'his')
+         call in_situ_check()
+         resetFindpts = 0
+         if (lastep .eq. 1) goto 1001
+
+!        modstep = mod(kstep, 500)
+!        if (modstep .eq. 0) then
+!           resetFindpts = 1
+!           call reinitialize   !added by keke, need to implement
+!           call updateVariables(d_xdrange, d_xerange, d_res3,d_res1,&
+!                       d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+!                       d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+!                       d_area,d_iface_flux,d_totalh,d_ur,&
+!                       d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+!                       d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+!                       d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+!           call printVerify
+!        endif
+
+!        auto load balancing
+         call bcast(diff_time, 8)
+         if (diff_time .gt. 0.1) then
+!           print *, "diff_time:", diff_time, "counter:", counter, nid &
+!                 , 0.01, last_kstep
+
+            if (last_kstep .eq. 0) then
+                counter = counter + 1
+            else if((counter .le. 2) .and. &
+                          (last_kstep .eq. kstep-1))then
+                counter = counter + 1
+            else
+                counter = 0
+            endif
+            last_kstep = kstep
+            if (counter .gt. 2) then
+                resetFindpts = 1
+                call reinitialize
+                call updateVariables(d_xdrange, d_xerange, d_res3,d_res1,&
+                        d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+                        d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+                        d_area,d_iface_flux,d_totalh,d_ur,&
+                        d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+                        d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+                call printVerify
+                reinit_step = kstep
+                if(nid .eq. 0) then
+                   print *, "reinitilize, reiniti_step:", reinit_step
+                endif
+                diff_time = 0.0
+                INIT_TIME = 100
+                counter = 0
+            endif
+         endif
+
+      enddo
+ 1001 lastep=1
+
+
+      call nek_comm_settings(isyc,0)
+
+      call comment
+
+!     check for post-processing mode
+      if (instep.eq.0) then
+         nsteps=0
+         istep=0
+         if(nio.eq.0) write(6,*) 'call userchk'
+         call userchk
+         if(nio.eq.0) write(6,*) 'done :: userchk'
+         call prepost (.true.,'his')
+      else
+         if (nio.eq.0) write(6,'(/,A,/)') &
+                        'end of time-step loop'
+      endif
+
+      RETURN
+      END
+!-----------------------------------------------------------------------
+      subroutine updateVariables(d_xdrange, d_xerange, d_res3,d_res1,&
+                        d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+                        d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+                        d_area,d_iface_flux,d_totalh,d_ur,&
+                        d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+                        d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+      use cudafor
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'TSTEP.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+
+      integer lfq,heresize,hdsize
+      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
+      parameter (lfq=lx1*lz1*2*ldim*lelcmt, &
+                        heresize=nqq*3*lfq, &
+                        hdsize=toteq*ldim*lfq)
+      common /dgrad/ d(ldg),dt(ldg),dg(ldg),dgt(ldg),jgl(ldg),jgt(ldg), wkd(lwkd)
+      common /CMTSURFLX/ fatface(heresize),notyet(hdsize)
+      integer isGPU, num_sh, num_cores, shArray(2, lelt*6)
+      common /shareddata/ isGPU, num_sh, num_cores, shArray
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+
+      real fatface,notyet
+
+      real, device :: d_xdrange(2,3)
+      real, device :: d_xerange(2,3,lelt)
+      real, device :: d_res3(lx1,ly1,lz1,toteq,lelt)
+!     real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_res1(lx1,ly1,lz1,lelt,toteq)
+      real, device :: d_bm1(lx1,ly1,lz1,lelt)
+      real, device :: d_tcoef(3,3)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_flux(nqq*3*lx1*lz1*2*ldim*lelt)
+      real, device :: d_w(lelt*lwkd)
+      real, device :: d_vx(lx1,ly1,lz1,lelt)
+      real, device :: d_vy(lx1,ly1,lz1,lelt)
+      real, device :: d_vz(lx1,ly1,lz1,lelt)
+      real, device :: d_vxd(lxd,lyd,lzd,lelt)
+      real, device :: d_vyd(lxd,lyd,lzd,lelt)
+      real, device :: d_vzd(lxd,lyd,lzd,lelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,lelt)
+      real, device :: d_pr(lx1,ly1,lz1,lelt)
+      real, device :: d_area(lx1,lz1,6,lelt)
+!     real, device :: d_phig(lx1,ly1,lz1,lelt)
+      real, device :: d_iface_flux(lx1*lz1*6,lelt)
+      real, device :: d_totalh(lelt*3*lxd*lyd*lzd)
+      real, device :: d_ur(lelt*lxd*lyd*lzd)
+      real, device :: d_us(lelt*lxd*lyd*lzd)
+      real, device :: d_ut(lelt*lxd*lyd*lzd)
+      real, device :: d_ud(lelt*lxd*lyd*lzd)
+      real, device :: d_tu(lelt*lxd*lyd*lzd)
+      real, device :: d_rx(lxd*lyd*lzd,9,lelt)
+      real, device :: d_dg(lxd*lyd*lzd)
+      real, device :: d_dgt(lxd*lyd*lzd)
+      real, device :: d_d(lxd*lyd*lzd)
+      real, device :: d_dt(lxd*lyd*lzd)
+      real, device :: d_jacmi(lx1*ly1*lz1,lelt)
+      real, device :: d_usrf(lx1,ly1,lz1,toteq)
+      real, device :: d_wghtc(lx1*lz1)
+      real, device :: d_wghtf(lxd*lzd)
+      real, device :: d_unx(lx1,lz1,6,lelt)
+      real, device :: d_uny(lx1,lz1,6,lelt)
+      real, device :: d_unz(lx1,lz1,6,lelt)
+      real, device :: d_cbc(lx1,lz1)
+      real, device :: d_all(lelt*6*lxd*lzd,26)
+      real, device :: d_jaco_c(lelt*6*lx1*lz1)
+
+
+      istate = cudaMemcpy(d_xerange,xerange,6*nelt,cudaMemcpyHosttoDevice)
+      istate = cudaMemcpy(d_xdrange,xdrange,6,cudaMemcpyHosttoDevice)
+
+        istate = cudaMemcpy(d_jgl,jgl,ldg,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_jgt,jgt,ldg,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_dgt,dgt,ldg,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_dg,dg,ldg,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_d,d,ldg,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_dt,dt,ldg,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_unx,unx,nelt*6*lx1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_uny,uny,nelt*6*lx1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_unz,unz,nelt*6*lx1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_area,area,nelt*6*lx1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_wghtc,wghtc,lx1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_wghtf,wghtf,lx1*lz1, cudaMemcpyHosttoDevice)
+!       istate = cudaMemcpy(d_phig,phig,lelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_rx,rx,nelt*9*lxd*lyd*lzd, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_jacmi,jacmi,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_usrf,usrf,toteq*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_bm1,bm1,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_tcoef,tcoef,9,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_res1,res1,nelt*lx1*ly1*lz1*toteq, cudaMemcpyHosttoDevice)
+
+        !-------------------------------
+!       istate = cudaMemcpy(d_u,u,lelt*toteq*lx1*ly1*lz1,cudaMemcpyHosttoDevice)
+
+
+        istate = cudaMemcpy(d_vtrans,vtrans,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_vx,vx,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_vy,vy,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_vz,vz,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_pr,pr,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_iface_flux,iface_flux,nelt*6*lx1*lz1,cudaMemcpyHosttoDevice)
+
+
+      print *, 'called update variables in GPU'
+      return
+      end
+!-----------------------------------------------------------------------
+      subroutine nek__multi_advance_gpu(kstep,msteps,d_res3,d_u,d_res1,&
+                        d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+                        d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+                        d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
+                        d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+                        d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+
+      use cudafor
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'TSTEP.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+
+      integer lfq,heresize,hdsize
+      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
+      parameter (lfq=lx1*lz1*2*ldim*lelcmt, &
+                        heresize=nqq*3*lfq, &
+                        hdsize=toteq*ldim*lfq)
+
+      real, device :: d_res3(lx1,ly1,lz1,toteq,nelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_res1(lx1,ly1,lz1,nelt,toteq)
+      real, device :: d_bm1(lx1,ly1,lz1,nelt)
+      real, device :: d_tcoef(3,3)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_flux(nqq*3*lx1*lz1*2*ldim*nelt)
+      real, device :: d_w(nelt*lwkd)
+      real, device :: d_vx(lx1,ly1,lz1,nelt)
+      real, device :: d_vy(lx1,ly1,lz1,nelt)
+      real, device :: d_vz(lx1,ly1,lz1,nelt)
+      real, device :: d_vxd(lxd,lyd,lzd,nelt)
+      real, device :: d_vyd(lxd,lyd,lzd,nelt)
+      real, device :: d_vzd(lxd,lyd,lzd,nelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,nelt)
+      real, device :: d_pr(lx1,ly1,lz1,nelt)
+      real, device :: d_area(lx1,lz1,6,nelt)
+      real, device :: d_phig(lx1,ly1,lz1,lelt)
+      real, device :: d_iface_flux(lx1*lz1*6,nelt)
+      real, device :: d_totalh(nelt*3*lxd*lyd*lzd)
+      real, device :: d_ur(nelt*lxd*lyd*lzd)
+      real, device :: d_us(nelt*lxd*lyd*lzd)
+      real, device :: d_ut(nelt*lxd*lyd*lzd)
+      real, device :: d_ud(nelt*lxd*lyd*lzd)
+      real, device :: d_tu(nelt*lxd*lyd*lzd)
+      real, device :: d_rx(lxd*lyd*lzd,9,nelt)
+      real, device :: d_dg(lxd*lyd*lzd)
+      real, device :: d_dgt(lxd*lyd*lzd)
+      real, device :: d_d(lxd*lyd*lzd)
+      real, device :: d_dt(lxd*lyd*lzd)
+      real, device :: d_jacmi(lx1*ly1*lz1,nelt)
+      real, device :: d_usrf(lx1,ly1,lz1,toteq)
+!      real, device :: d_vols(lx1,ly1,lz1,nelt,5)
+      real, device :: d_wghtc(lx1*lz1)
+      real, device :: d_wghtf(lxd*lzd)
+      real, device :: d_unx(lx1,lz1,6,nelt)
+      real, device :: d_uny(lx1,lz1,6,nelt)
+      real, device :: d_unz(lx1,lz1,6,nelt)
+      real, device :: d_cbc(lx1,lz1)
+      real, device :: d_all(nelt*6*lxd*lzd,26)
+      real, device :: d_jaco_c(nelt*6*lx1*lz1)
+      do i=1,msteps
+         istep = istep+i
+         call nek_advance_gpu(d_res3,d_u,d_res1,&
+                        d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+                        d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+                        d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
+                        d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+                        d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+
+         if (ifneknek) call userchk_set_xfer
+         if (ifneknek) call bcopy
+         if (ifneknek) call chk_outflow
+
+      enddo
+
+      return
+      end
+!-----------------------------------------------------------------------
+      subroutine nek_advance_gpu(d_res3,d_u,d_res1,&
+                        d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+                        d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+                        d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
+                        d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+                        d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'CTIMER.cuf'
+      include 'MASS.cuf'
+      include 'TSTEP.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+
+      common /cgeom/ igeom
+
+      integer lfq,heresize,hdsize
+      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
+      parameter (lfq=lx1*lz1*2*ldim*lelcmt, &
+                        heresize=nqq*3*lfq, &
+                        hdsize=toteq*ldim*lfq)
+
+      real, device :: d_res3(lx1,ly1,lz1,toteq,nelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_res1(lx1,ly1,lz1,nelt,toteq)
+      real, device :: d_bm1(lx1,ly1,lz1,nelt)
+      real, device :: d_tcoef(3,3)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_flux(nqq*3*lx1*lz1*2*ldim*nelt)
+      real, device :: d_w(nelt*lwkd)
+      real, device :: d_vx(lx1,ly1,lz1,nelt)
+      real, device :: d_vy(lx1,ly1,lz1,nelt)
+      real, device :: d_vz(lx1,ly1,lz1,nelt)
+      real, device :: d_vxd(lxd,lyd,lzd,nelt)
+      real, device :: d_vyd(lxd,lyd,lzd,nelt)
+      real, device :: d_vzd(lxd,lyd,lzd,nelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,nelt)
+      real, device :: d_pr(lx1,ly1,lz1,nelt)
+      real, device :: d_area(lx1,lz1,6,nelt)
+      real, device :: d_phig(lx1,ly1,lz1,lelt)
+      real, device :: d_iface_flux(lx1*lz1*6,nelt)
+      real, device :: d_totalh(nelt*3*lxd*lyd*lzd)
+      real, device :: d_ur(nelt*lxd*lyd*lzd)
+      real, device :: d_us(nelt*lxd*lyd*lzd)
+      real, device :: d_ut(nelt*lxd*lyd*lzd)
+      real, device :: d_ud(nelt*lxd*lyd*lzd)
+      real, device :: d_tu(nelt*lxd*lyd*lzd)
+      real, device :: d_rx(lxd*lyd*lzd,9,nelt)
+      real, device :: d_dg(lxd*lyd*lzd)
+      real, device :: d_dgt(lxd*lyd*lzd)
+      real, device :: d_d(lxd*lyd*lzd)
+      real, device :: d_dt(lxd*lyd*lzd)
+      real, device :: d_jacmi(lx1*ly1*lz1,nelt)
+      real, device :: d_usrf(lx1,ly1,lz1,toteq)
+!      real, device :: d_vols(lx1,ly1,lz1,nelt,5)
+      real, device :: d_wghtc(lx1*lz1)
+      real, device :: d_wghtf(lxd*lzd)
+      real, device :: d_unx(lx1,lz1,6,nelt)
+      real, device :: d_uny(lx1,lz1,6,nelt)
+      real, device :: d_unz(lx1,lz1,6,nelt)
+      real, device :: d_cbc(lx1,lz1)
+      real, device :: d_all(nelt*6*lxd*lzd,26)
+      real, device :: d_jaco_c(nelt*6*lx1*lz1)
+      call nekgsync
+      if (iftran) call settime
+      if (ifmhd ) call cfl_check
+      call setsolv
+      call comment
+
+      if (ifcmt) then
+         if (nio.eq.0.and.istep.le.1) write(6,*) 'CMT branch active'
+         cmtime = dnekclock()
+         call cmt_nek_advance_gpu(d_res3,d_u,d_res1,&
+                        d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+                        d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+                        d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
+                        d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+                        d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+         !print *,'cmt nek time is ',dnekclock()-cmtime
+         return
+      endif
+
+      if (ifsplit) then   ! PN/PN formulation
+
+         igeom = 1
+         if (ifheat)          call heat     (igeom)
+         call setprop
+         call qthermal
+         igeom = 1
+         if (ifflow)          call fluid    (igeom)
+         if (param(103).gt.0) call q_filter(param(103))
+         call setup_convect (2) ! Save convective velocity _after_ filter
+
+      else                ! PN-2/PN-2 formulation
+	 call setprop
+         do igeom=1,ngeom
+
+            if (igeom.gt.2) call userchk_set_xfer
+
+            if (ifgeom) then
+               call gengeom (igeom)
+               call geneig  (igeom)
+            endif
+
+            if (ifneknekm.and.igeom.eq.2) call multimesh_create
+
+            if (ifmhd) then
+               if (ifheat)      call heat     (igeom)
+                                call induct   (igeom)
+            elseif (ifpert) then
+               if (ifbase.and.ifheat)  call heat          (igeom)
+               if (ifbase.and.ifflow)  call fluid         (igeom)
+               if (ifflow)             call fluidp        (igeom)
+               if (ifheat)             call heatp         (igeom)
+            else  ! std. nek case
+               if (ifheat)             call heat          (igeom)
+               if (ifflow)             call fluid         (igeom)
+               if (ifmvbd)             call meshv         (igeom)
+            endif
+
+            if (igeom.eq.ngeom.and.param(103).gt.0)&
+                        call q_filter(param(103))
+
+            call setup_convect (igeom) ! Save convective velocity _after_ filter
+
+         enddo
+      endif
+
+      return
+      end
+
+!-----------------------------------------------------------------------
+
+     subroutine cmt_nek_advance_gpu(d_res3,d_u,d_res1,&
+                        d_bm1,d_tcoef,d_jgl,d_jgt,d_flux,d_w,d_vx,&
+                        d_vy,d_vz,d_vxd,d_vyd,d_vzd,d_vtrans,d_pr,&
+                        d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
+                        d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
+                        d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+!
+!     Solve the Euler equations
+
+      use cudafor
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'TSTEP.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+
+      integer e,eq
+      character*32 dumchars
+      integer lfq,heresize,hdsize
+      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
+      parameter (lfq=lx1*lz1*2*ldim*lelcmt, &
+                        heresize=nqq*3*lfq, &
+                        hdsize=toteq*ldim*lfq)
+      common /dgrad/ d(ldg),dt(ldg),dg(ldg),dgt(ldg),jgl(ldg),jgt(ldg), wkd(lwkd)
+      common /CMTSURFLX/ fatface(heresize),notyet(hdsize)
+!     common /shareddata/ isGPU, num_sh, shArray(2, lelt*6)
+      integer isGPU, num_sh, num_cores, shArray(2, lelt*6)
+      common /shareddata/ isGPU, num_sh, num_cores, shArray
+
+      real fatface,notyet
+
+      real, device :: d_res3(lx1,ly1,lz1,toteq,nelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_res1(lx1,ly1,lz1,nelt,toteq)
+      real, device :: d_bm1(lx1,ly1,lz1,nelt)
+      real, device :: d_tcoef(3,3)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_flux(nqq*3*lx1*lz1*2*ldim*nelt)
+      real, device :: d_w(nelt*lwkd)
+      real, device :: d_vx(lx1,ly1,lz1,nelt)
+      real, device :: d_vy(lx1,ly1,lz1,nelt)
+      real, device :: d_vz(lx1,ly1,lz1,nelt)
+      real, device :: d_vxd(lxd,lyd,lzd,nelt)
+      real, device :: d_vyd(lxd,lyd,lzd,nelt)
+      real, device :: d_vzd(lxd,lyd,lzd,nelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,nelt)
+      real, device :: d_pr(lx1,ly1,lz1,nelt)
+      real, device :: d_area(lx1,lz1,6,nelt)
+      real, device :: d_phig(lx1,ly1,lz1,lelt)
+      real, device :: d_iface_flux(lx1*lz1*6,nelt)
+      real, device :: d_totalh(nelt*3*lxd*lyd*lzd)
+      real, device :: d_ur(nelt*lxd*lyd*lzd)
+      real, device :: d_us(nelt*lxd*lyd*lzd)
+      real, device :: d_ut(nelt*lxd*lyd*lzd)
+      real, device :: d_ud(nelt*lxd*lyd*lzd)
+      real, device :: d_tu(nelt*lxd*lyd*lzd)
+      real, device :: d_rx(lxd*lyd*lzd,9,nelt)
+      real, device :: d_dg(lxd*lyd*lzd)
+      real, device :: d_dgt(lxd*lyd*lzd)
+      real, device :: d_d(lxd*lyd*lzd)
+      real, device :: d_dt(lxd*lyd*lzd)
+      real, device :: d_jacmi(lx1*ly1*lz1,nelt)
+      real, device :: d_usrf(lx1,ly1,lz1,toteq)
+!      real, device :: d_vols(lx1,ly1,lz1,nelt,5)
+      real, device :: d_wghtc(lx1*lz1)
+      real, device :: d_wghtf(lxd*lzd)
+      real, device :: d_unx(lx1,lz1,6,nelt)
+      real, device :: d_uny(lx1,lz1,6,nelt)
+      real, device :: d_unz(lx1,lz1,6,nelt)
+      real, device :: d_cbc(lx1,lz1)
+      real, device :: d_all(nelt*6*lxd*lzd,26)
+      real, device :: d_jaco_c(nelt*6*lx1*lz1)
+
+      real cpu_array(10*num_sh*lx1*lx1)
+      Integer i, ii
+      !print *,'------nelt:',nelt,'lelt:',lelt
+      alltime = dnekclock()
+      starttime = dnekclock()
+      if(istep.eq.1) call set_tstep_coef !- level2.txt
+      if(istep.eq.1) call cmt_flow_ics(ifrestart) !- level2.txt
+      tmem1 = dnekclock()
+
+      tmem2 = dnekclock()
+!      print *,'allocate time is ', tmem2-tmem1
+      if(istep.eq.1) then
+      	call get_int_ptr(i,lx1,lxd)
+      	call get_dgl_ptr(ip,lxd,lxd) ! fills dg, dgt
+      endif
+      nxyz1=lx1*ly1*lz1
+      n = nxyz1*nelt*toteq
+      nfldpart = ndim*npart
+
+      if(istep.eq.1) then
+	istate = cudaMemcpy(d_jgl,jgl,ldg,cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_jgt,jgt,ldg,cudaMemcpyHosttoDevice)
+     	istate = cudaMemcpy(d_dgt,dgt,ldg,cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_dg,dg,ldg,cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_d,d,ldg,cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_dt,dt,ldg,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_unx,unx,nelt*6*lx1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_uny,uny,nelt*6*lx1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_unz,unz,nelt*6*lx1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_area,area,nelt*6*lx1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_wghtc,wghtc,lx1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_wghtf,wghtf,lx1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_phig,phig,lelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_rx,rx,nelt*9*lxd*lyd*lzd, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_jacmi,jacmi,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_usrf,usrf,toteq*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+	istate = cudaMemcpy(d_bm1,bm1,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_tcoef,tcoef,9,cudaMemcpyHosttoDevice)
+        istate = cudaMemcpy(d_res1,res1,nelt*lx1*ly1*lz1*toteq, cudaMemcpyHosttoDevice)
+	
+	!-------------------------------
+	istate = cudaMemcpy(d_u,u,lelt*toteq*lx1*ly1*lz1,cudaMemcpyHosttoDevice)
+
+
+      	istate = cudaMemcpy(d_vtrans,vtrans,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_vx,vx,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_vy,vy,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_vz,vz,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_pr,pr,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+      	istate = cudaMemcpy(d_iface_flux,iface_flux,nelt*6*lx1*lz1,cudaMemcpyHosttoDevice)	
+      endif
+      
+      
+      tmem = dnekclock()
+      !print *, 'copy time ',tmem-tmem2
+
+      nstage = 3
+      do stage=1,nstage
+!         if (stage.eq.1) call nekcopy(res3(1,1,1,1,1),U(1,1,1,1,1),n) !(level2.txt)
+         gtime = dnekclock()
+         if (stage.eq.1) call nekcopywrapper(d_res3,d_u,n)
+	 !print *,'nekcopy time ', dnekclock()-gtime
+         gtime = dnekclock()
+	 call set_dealias_face
+         !print *, 'dealias time: ', dnekclock()-gtime
+
+!     filter the conservative variables before start of each
+!     time step
+	 gtime = dnekclock()
+         if(stage.gt.1) call computeprimitivevarswrapper(d_vx, &
+                        d_vy,d_vz, &
+                        d_vxd,d_vyd,d_vzd,d_u,d_jgl,d_jgt,d_w, lxd, &
+                        lx1, nelt, toteq, irpu, irpv, &
+                        irpw, irg, lwkd,0)
+	
+	 !print *, 'computeprimitive time: ',dnekclock()-gtime
+         gtime = dnekclock()
+         ntot = lx1*ly1*lz1*lelcmt*toteq
+	 nstate=nqq
+         nfq=nx1*nz1*2*ndim*nelt
+         iqm =1
+      	 iqp =iqm+nstate*nfq
+      	 iflx=iqp+nstate*nfq
+	 ntot1 = nfq*nstate
+	 i_cvars=(iu1-1)*nfq+1
+	 call fillqWrapper(d_vtrans,d_vx,d_vy,d_vz,d_pr, d_flux(iqm),&
+                            nelt, lx1*lz1*2*ndim, nx1*ny1*nz1, &
+                            d_iface_flux, true, false)
+	 !print *,'fillq time', dnekclock()-gtime
+	 gtime = dnekclock()
+	 call faceuWrapper(toteq, lx1*lz1*2*ndim, nx1*ny1*nz1, nelt, d_u,&
+                           d_flux(i_cvars), d_iface_flux)
+
+         !print *,'faceu time:',dnekclock()-gtime
+	 gtime = dnekclock()
+         !get compact array from GPU
+	 !print *,'num_sh=',num_sh
+	 if(num_sh.GT.0) then
+	 ctime = dnekclock()
+	 !print *,'sh[0]',shArray(1,1),shArray(2,1),shArray(1,800),shArray(2,800)
+	 call packFacesWrapper(d_flux(iqm), d_all, shArray, num_sh, nelt,&
+                            lx1, iu1, 0)
+	 !print *,'after pack'
+         !zero out CPU copy of fatface
+         !unpack compact array from GPU
+         istate = cudaMemcpy(cpu_array(1),d_all,10*num_sh*lx1*lz1, &
+                          cudaMemcpyDevicetoHost)
+         !print *, 'after cudaMemcpy',cpu_array(1)
+         call assign_fatface_gpu_array(fatface(iqp), cpu_array(1), 0)
+	 !print *,'first copy time::',dnekclock()-ctime
+	 endif
+         !print *,'iu1:',iu1,'nstate:',nstate,'fillq+faceu:',tcomm-tbeg2
+      	 call face_state_commo(fatface(iqm),fatface(iqp),nfq,nstate &
+                          ,dg_hndl) !- level4.txt
+
+	 !print *,'face_state_commo time:',dnekclock()-gtime
+	 gtime = dnekclock()
+         if(num_sh.GT.0) then
+	 ctime = dnekclock()
+	 call assign_fatface_gpu_array(fatface(iqp), cpu_array(1), 1)
+      	 istate = cudaMemcpy(d_all,cpu_array(1),10*num_sh*lx1*lz1, &
+                          cudaMemcpyHosttoDevice)
+         call packFacesWrapper(d_flux(iqp), d_all, shArray, num_sh, nelt, lx1, iu1, 1)
+	 !print *,'second copy time::',dnekclock()-ctime
+	 endif
+
+	 call InviscidFluxwrapper(d_flux(iqm), d_flux(iqp), d_flux(iflx), &
+          d_unx, d_uny, &
+          d_unz, d_area, d_wghtc, d_wghtf, d_cbc, d_jgl, d_jgt,  &
+          d_all(1,1), d_all(1,2), d_all(1,3) , d_all(1,4),  &
+          d_all(1,5),d_all(1,6), d_all(1,7),d_all(1,8),  &
+          d_all(1,9),d_all(1,10),d_all(1,11),d_all(1,12), &
+          d_all(1,13),d_all(1,14),d_all(1,15),d_all(1,16),d_all(1,17), &
+          d_all(1,18),d_all(1,19),d_all(1,20),d_all(1,21),d_all(1,22), &
+          d_jaco_c, &
+          toteq, nstate, nflux, nxd,nx1,nelt,ndim,  &
+          irho, iux, iuy, iuz, ipr, ithm, isnd, icpf, iph)
+	 !print *,'inviscid time:',dnekclock()-gtime
+	 gtime = dnekclock()
+      	 call surfaceintegralwrapper(d_flux(iflx),d_area,d_phig,d_res1, &
+                       d_iface_flux,toteq,nx1,ny1,nz1,nelt,2*ndim)
+	 !print *,'surface integral time:',dnekclock()-gtime
+      	 iuj=iflx ! overwritten with [[U]]
+	 gtime = dnekclock()
+!      print *,'hiii',nelt,toteq
+      	call computestageWrapper(d_jgl,d_jgt,d_totalh,d_u,d_ur,d_us,d_phig, &
+      		d_pr,d_vxd,d_vyd,d_vzd,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_res1, &
+      		d_w,d_jacmi,d_bm1,d_usrf,d_d,d_dt,nelt,toteq,ndim,lwkd,nx1,lxd)
+         !print *,'compute stage time:',dnekclock()-gtime
+	 gtime = dnekclock()
+ 
+!         call compute_rhs_and_dt_gpu(d_vols(1,1,1,1,2),d_vols(1,1,1,1,3), &
+!              d_vols(1,1,1,1,4),d_vols(1,1,1,1,5),d_vols(1,1,1,1,1), &
+!              d_vxd,d_vyd,d_vzd,d_u,d_jgl, &
+!              d_jgt, d_w,d_vols,d_flux,d_iface_flux,d_unx, d_uny, d_unz, &
+!              d_area, d_wghtc, d_wghtf, d_cbc, d_all, d_jaco_c,d_res1, &
+!              d_phig,d_totalh,d_ur,d_us, d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt, &
+!              d_jacmi,d_bm1,d_usrf,d_d,d_dt)
+         call calculateuwrapper(d_u,d_bm1,d_tcoef,d_res3,d_res1,stage, nelt,nxyz1,toteq)
+	 !print *, 'calcu time:',dnekclock()-gtime
+      
+	 !print *,tbeg3-tbeg2,tbeg4-tbeg3,tbeg5-tbeg4,tbeg6-tbeg4
+!         do e=1,nelt
+!            do eq=1,toteq
+!            do i=1,nxyz1
+! multiply u with bm1 as res has been multiplied by bm1 in compute_rhs
+!               u(i,1,1,eq,e) = bm1(i,1,1,e)*tcoef(1,stage)
+!     >                     *res3(i,1,1,eq,e)+bm1(i,1,1,e)*
+!     >                     tcoef(2,stage)*u(i,1,1,eq,e)-
+!     >                     tcoef(3,stage)*res1(i,1,1,e,eq)
+!-----------------------------------------------------------------------
+! this completely stops working if B become nondiagonal for any reason.
+!               u(i,1,1,eq,e) = u(i,1,1,eq,e)/bm1(i,1,1,e)
+! that completely stops working if B become nondiagonal for any reason.
+!-----------------------------------------------------------------------
+!            enddo
+!            enddo
+!         enddo
+      enddo
+      !u = d_u
+
+      !print *,'all time is:',dnekclock()-alltime
+
+ 101  format(4(2x,e18.9))
+      return
+      end
+
+      subroutine nek_cmt_init
+      include 'SIZE.cuf'
+      include 'DG.cuf'
+      call get_shared_faces 
+      if (nio.eq.0) write(6,*)'Set up CMT-Nek'
+      if (toteq.ne.5) then
+         if (nio.eq.0) write(6,*)'toteq is low ! toteq = ',toteq
+         if (nio.eq.0) write(6,*) 'Reset toteq in SIZE to 5'
+         call exitt
+      endif
+      if (lelcmt.ne.lelt) then
+         if (nio.eq.0) write(6,*)'ERROR! lelcmt is not same as lelt '
+         if (nio.eq.0) write(6,*) 'lelcmt=',lelcmt,' lelt=',lelt
+         call exitt
+      endif
+      call setup_cmt_commo
+
+!     call setup_cmt_param
+
+      return
+      end
+
+
+!-------------------------------------------------------------------------------
+
+subroutine process_gpu_particles(d_xdrange,d_xerange,d_rpart,d_ipart,&
+                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
+                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
+
+      use cudafor
+      include 'SIZE.cuf'
+      include 'TSTEP.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+
+      parameter (lr=16*ldim,li=5+6)
+      parameter (lrf=4+ldim,lif=5+5)
+      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
+
+      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 16*ndim
+      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+      common  /iparti/ n,nr,ni
+
+      real, device :: d_xdrange(2,3)
+      real, device :: d_xerange(2,3,lelt)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      integer, device :: d_fptsmap(lpart)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)
+      real, device :: d_vx(lx1,ly1,lz1,lelt)
+      real, device :: d_vy(lx1,ly1,lz1,lelt)
+      real, device :: d_vz(lx1,ly1,lz1,lelt)
+      real, device :: d_vxd(lxd,lyd,lzd,lelt)
+      real, device :: d_vyd(lxd,lyd,lzd,lelt)
+      real, device :: d_vzd(lxd,lyd,lzd,lelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_w(nelt*lwkd)
+
+      real    pt_timers(10), scrt_timers(10)
+      common /trackingtime/ pt_timers, scrt_timers
+
+      scrt_timers(1) = dnekclock()
+      !print *, "came here", nelt, lelt, istep
+      call stokes_particles2(d_xdrange,d_xerange,d_rpart,d_ipart,&
+                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
+                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
+      pt_timers(1) = pt_timers(1) + dnekclock() - scrt_timers(1)
+      ipttime = 10
+if(istep.eq.nsteps.or. &
+                (istep.gt.1.and.mod(istep,ipttime).eq.0))then
+         ptdum = glsum(ftime,1)
+         if(nid.eq.0) write(6,10)'flow solver time     ', ptdum &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(1),1)
+         if(nid.eq.0) write(6,10)'stokes_particles time', ptdum &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(2),1)
+         if(nid.eq.0) write(6,10)'init_stokes_ptls time', ptdum &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(3),1)
+         if(nid.eq.0) write(6,10)'updt_stokes_ptls time', ptdum &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(4),1)
+         if(nid.eq.0) write(6,10)'interp_u_for_adv time', ptdum &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(5),1)
+         if(nid.eq.0) write(6,10)'find_pts   time      ', ptdum  &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(6),1)
+         if(nid.eq.0) write(6,10)'crystal router time  ', ptdum &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(7),1)
+         if(nid.eq.0) write(6,10)'findpts_eval 3 time  ', ptdum &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(8),1)
+         if(nid.eq.0) write(6,10)'BDF3/EX2             ', ptdum &
+                , ptdum/istep
+         ptdum = glsum(pt_timers(9),1)
+         if(nid.eq.0) write(6,10)'locate remote part   ', ptdum &
+                , ptdum/istep
+      endif
+      ifxyo=.true.
+      if(istep.gt.1)ifxyo=.false.
+10    format(A21,1x,2(f14.7,1x))
+      return
+      end
+!-----------------------------------------------------------------------
+
+subroutine stokes_particles2(d_xdrange,d_xerange,d_rpart,d_ipart,&
+                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
+                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
+      use cudafor
+      include 'SIZE.cuf'
+      include 'TSTEP.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+      include 'PARALLEL.cuf'
+
+      parameter (lr=16*ldim,li=5+6)
+      parameter (lrf=4+ldim,lif=5+5)
+      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
+
+      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 16*ndim
+      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+      common  /iparti/ n,nr,ni
+
+      real, device :: d_xdrange(2,3)
+      real, device :: d_xerange(2,3,lelt)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      integer, device :: d_fptsmap(lpart)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)
+      real, device :: d_vx(lx1,ly1,lz1,lelt)
+      real, device :: d_vy(lx1,ly1,lz1,lelt)
+      real, device :: d_vz(lx1,ly1,lz1,lelt)
+      real, device :: d_vxd(lxd,lyd,lzd,lelt)
+      real, device :: d_vyd(lxd,lyd,lzd,lelt)
+      real, device :: d_vzd(lxd,lyd,lzd,lelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_w(nelt*lwkd)
+      real    pt_timers(10), scrt_timers(10)
+      common /trackingtime/ pt_timers, scrt_timers
+
+      !print *,'n,nr,ni,np',n,nr,ni,np
+      scrt_timers(3) = dnekclock()
+
+      print *, 'n: ', n, "call GPU update particles"
+      call update_stokes_particles_gpu2 (rpart,nr,ipart,ni,n,&
+                        d_xdrange,d_xerange,d_rpart,d_ipart,&
+                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
+                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt,d_w)
+!     print *, 'n: ', n, "end GPU update particles"
+      pt_timers(3) = pt_timers(3) + dnekclock() - scrt_timers(3)
+
+      return
+      end
+!-----------------------------------------------------------------------
+subroutine update_stokes_particles_gpu2(rpart,nr,ipart,ni,n,&
+                        d_xdrange,d_xerange,d_rpart,d_ipart,&
+                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
+                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
+      use cudafor
+      include 'SIZE.cuf'
+      !include 'TSTEP.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+      include 'PARALLEL.cuf'
+
+      parameter (lr=16*ldim,li=5+6)
+      parameter (lrf=4+ldim,lif=5+5)
+      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
+
+      real, device :: d_xdrange(2,3)
+      real, device :: d_xerange(2,3,lelt)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      integer, device :: d_fptsmap(lpart)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)
+      real, device :: d_vx(lx1,ly1,lz1,lelt)
+      real, device :: d_vy(lx1,ly1,lz1,lelt)
+      real, device :: d_vz(lx1,ly1,lz1,lelt)
+      real, device :: d_vxd(lxd,lyd,lzd,lelt)
+      real, device :: d_vyd(lxd,lyd,lzd,lelt)
+      real, device :: d_vzd(lxd,lyd,lzd,lelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_w(nelt*lwkd)
+      integer, device :: d_flagsend
+
+      integer flagsend, flagreceive   !used to inform all processor to stop when one particle move out of the domain
+
+
+      common /myparth/ i_fp_hndl, i_cr_hndl
+      common /myparts/ times(0:3),alpha(0:3),beta(0:3)
+      real    pt_timers(10), scrt_timers(10)
+      common /trackingtime/ pt_timers, scrt_timers
+
+      real    rpart(nr,n)
+      integer ipart(ni,n)
+
+      real  xdrange(2,3)
+      common /domainrange/ xdrange
+
+!     common /ptpointers/ jrc,jpt,je0,jps,jai,nai,jr,jd,jx,jy,jz,jx1  &
+!               ,jx2,jx3,jv0,jv1,jv2,jv3,ju0,ju1,ju2,ju3,jf0,jar,&
+!               jaa,jab,jac,jad,nar
+      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
+                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
+                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
+      COMMON /TSTEP1/ TIME,TIMEF,FINTIM,TIMEIO &
+                    ,DT,DTLAG(10),DTINIT,DTINVM,COURNO,CTARG &
+                    ,AB(10),BD(10),ABMSH(10) &
+                    ,AVDIFF(LDIMT1),AVTRAN(LDIMT1),VOLFLD(0:LDIMT1) &
+                    ,TOLREL,TOLABS,TOLHDF,TOLPDF,TOLEV,TOLNL,PRELAX &
+                    ,TOLPS,TOLHS,TOLHR,TOLHV,TOLHT(LDIMT1),TOLHE &
+                    ,VNRMH1,VNRMSM,VNRML2,VNRML8,VMEAN &
+                    ,TNRMH1(LDIMT),TNRMSM(LDIMT),TNRML2(LDIMT) &
+                    ,TNRML8(LDIMT),TMEAN(LDIMT)
+
+      jx0 = jx
+
+      flagsend = 0
+      flagreceive = 0
+
+      scrt_timers(8) = dnekclock()
+      call get_bdf_ext_coefs(beta,alpha,times)
+     
+      if(n.gt.0) then
+      istate = cudaMemcpy(rpart,d_rpart,nr*n, cudaMemcpyDevicetoHost)
+      istate = cudaMemcpy(ipart,d_ipart,ni*n, cudaMemcpyDevicetoHost)
+      istate = cudaMemcpy(d_flagsend, flagsend, 1, cudaMemcpyHosttoDevice)
+!     !for debug by keke
+!     print *,'before update wrapper, dt: ', DT, &
+!     do i = 1, n
+!        print *, 'gpu ipart: ', i, & !ipart(1,1), ipart(2,1), ipart(3,1),&
+!                        lglel(ipart(je0)+1) , rpart(jx, i), &
+!                        rpart(jy, i), rpart(jz, i), &
+!                        rpart(jy,i) + (1.0/3)*rpart(jy, i)*DT 
+!                        rpart(jy,i),& !  + rpart(jab,i) * rpart(jad,i), &
+!                        rpart(jz,i)   ! + rpart(jac,i) * rpart(jad,i)
+!     enddo
+!     !end debug added by keke
+
+      call updatestokeswrapper(d_rpart, alpha, beta, d_xdrange, ndim, nr  &
+                ,ni, n, jx0, jx1, jx2, jx3, jv0, jv1, jv2, jv3, ju0  &
+                ,ju1, ju2, ju3, jar, jf0, jaa, jab, jac, jad, d_flagsend, DT)
+
+      istate = cudaMemcpy(rpart,d_rpart,nr*n, cudaMemcpyDevicetoHost)
+      istate = cudaMemcpy(ipart,d_ipart,ni*n, cudaMemcpyDevicetoHost)
+      istate = cudaMemcpy(flagsend, d_flagsend, 1, cudaMemcpyDevicetoHost)
+
+!     !for debug by keke
+      print *,'after update wrapper, flagsend: ', flagsend, &
+         'gpu ipart: ', ipart(1,1), ipart(2,1), ipart(3,1),&
+                         lglel(ipart(je0)+1) 
+
+!     do i = 1, n
+!        write(*,*), i, ipart(je0, i), lglel(ipart(je0, i)+1), rpart(jx, i), &
+!                        rpart(jy, i), rpart(jz, i)
+!     enddo
+      !end debug added by keke
+      endif
+
+      call igop (flagsend, flagreceive, '+  ', 1)
+      if (flagreceive .ne. 0) then
+         call exitt
+      endif
+
+      pt_timers(8) = pt_timers(8) + dnekclock() - scrt_timers(8)
+
+!      call compute_primitive_vars_gpu
+      !print *,'before compute primitive wrapper'
+!      comp_time = dnekclock()
+      if(n.gt.0) then
+      call computeprimitivevarswrapper(d_vx, d_vy, d_vz, d_vxd,  &
+                d_vyd, d_vzd, d_u, d_jgl, d_jgt, d_w, lxd,  &
+                lx1, nelt, toteq, irpu, irpv,  &
+                irpw, irg, ldw,0)
+      endif
+      !print *, 'computeprimitive point force',dnekclock()-comp_time
+
+
+      call interp_u_for_adv2(rpart,nr,ipart,ni,n,ux,uy,uz,&
+                        d_rpart,d_ipart,d_fptsmap,d_rfpts,d_ifpts,d_xerange &
+                        ,d_vx,d_vy,d_vz)
+      !print *,'after interp'
+      return
+      end
+
+!-------------------------------------------------------------------
+      subroutine interp_u_for_adv2(rpart,nr,ipart,ni,n,ux,uy,uz,&
+                        d_rpart,d_ipart,d_fptsmap,d_rfpts,d_ifpts,d_xerange &
+                ,d_vx,d_vy,d_vz)
+      use cudafor
+      include 'SIZE.cuf'
+      include 'TSTEP.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+      include 'PARALLEL.cuf'
+
+      common /myparth/ i_fp_hndl, i_cr_hndl
+
+      real    pt_timers(10), scrt_timers(10)
+      common /trackingtime/ pt_timers, scrt_timers
+
+      real    rpart(nr,n),ux(1),uy(1),uz(1)
+      integer ipart(ni,n)
+
+      parameter (lrf=4+ldim,lif=5+5)
+      real               rfpts(lrf,lpart)
+      common /fptspartr/ rfpts
+      integer            ifpts(lif,lpart),fptsmap(lpart)
+      common /fptsparti/ ifpts,fptsmap
+
+      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
+                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
+                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
+
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      integer, device :: d_fptsmap(lpart)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)
+      real, device :: d_xerange(2,3,lelt)
+      real, device :: d_vx(lx1,ly1,lz1,nelt)
+      real, device :: d_vy(lx1,ly1,lz1,nelt)
+      real, device :: d_vz(lx1,ly1,lz1,nelt)
+
+      integer icalld1
+      save    icalld1
+      data    icalld1 /0/
+
+      logical partl         ! This is a dummy placeholder, used in cr()
+      nl = 0                ! No logicals exchanged
+
+      scrt_timers(4) = dnekclock()
+      call interp_comm_part()
+      !print *, "done gpu adv"
+      scrt_timers(9) = dnekclock()
+
+      call particles_in_nid_gpu2(d_fptsmap,d_rfpts,lrf,d_ifpts,lif,nfpts,  &
+                d_rpart,nr,d_ipart,ni,n,d_xerange)
+!      nfpts = 0
+!      call particles_in_nid_wrapper(d_rfpts, d_ifpts, d_rpart,  &
+!                 d_ipart, d_xerange,  &
+!                 d_fptsmap, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
+!                jx, jy, jz, je0, jrc, jpt, jd, jr, nid)
+ 
+      scrt_timers(5) = dnekclock()
+      !print *,'after part in nid',nfpts
+      if(nfpts.gt.0) then
+         istate = cudaMemcpy(ifpts,d_ifpts,lif*n, &
+                          cudaMemcpyDevicetoHost)
+         istate = cudaMemcpy(rfpts,d_rfpts,lrf*n, &
+                          cudaMemcpyDevicetoHost)
+         istate = cudaMemcpy(fptsmap,d_fptsmap,n, &
+                          cudaMemcpyDevicetoHost)
+      endif
+
+!     !for debug by keke
+!     print *,'after particles_in_nid, before findpts, nfpts is ', nfpts
+!     do i = 1, nfpts
+!        print *, i, 'ifpts(je0)', ifpts(je0, i)
+!     enddo
+!     !end debug added by keke
+
+      call findpts(i_fp_hndl  &
+                , ifpts(jrc,1),lif  &
+                , ifpts(jpt,1),lif  &
+                , ifpts(je0,1),lif  &
+                , rfpts(jr ,1),lrf  &
+                , rfpts(jd ,1),lrf  &
+                , rfpts(jx ,1),lrf  &
+                , rfpts(jy ,1),lrf  &
+                , rfpts(jz ,1),lrf ,nfpts)
+      scrt_timers(5) = dnekclock() - scrt_timers(5)
+      pt_timers(5) = scrt_timers(5) + pt_timers(5)
+
+!     !for debug by keke
+!     print *,'after findpts, before update_findpts_info'
+!     do i = 1, nfpts
+!        print *, i, 'ifpts(je0)', ifpts(je0, i)
+!     enddo
+!     !end debug added by keke
+
+nmax = iglmax(n,1)
+      if (nmax.gt.lpart) then
+         if (nid.eq.0) write(6,1) nmax,lpart
+    1    format('WARNING: Max number of particles:'  &
+                i9,'.  Not moving because lpart =',i9,'.')
+      else
+         scrt_timers(6) = dnekclock()
+	 !print *,'before copy', nr, ni, n
+         if(n.gt.0) then
+         istate = cudaMemcpy(rpart,d_rpart,nr*n, &
+                          cudaMemcpyDevicetoHost)
+         istate = cudaMemcpy(ipart,d_ipart,ni*n, &
+                          cudaMemcpyDevicetoHost)
+	 !print *, 'after copy'
+         endif
+         call update_findpts_info(rfpts,lrf  &
+                ,ifpts,lif,fptsmap,nfpts)
+         scrt_timers(9) = dnekclock() - scrt_timers(9) - scrt_timers(5)
+         pt_timers(9) = scrt_timers(9) + pt_timers(9)
+
+
+!     !for debug by keke
+!     print *,'after update_findpts_info, before tuple_transfer'
+!     do i = 1, n
+!        print *, i, 'ipart(je0)', ipart(je0, i)
+!     enddo
+!     !end debug added by keke
+
+         jps = jpid1-1     ! Pointer to temporary proc id for swapping
+         do i=1,n        ! Can't use jpt because it messes up particle info
+            ipart(jps,i) = ipart(jpt,i)
+         enddo
+
+         call crystal_tuple_transfer(i_cr_hndl,n,lpart  &
+                , ipart,ni,partl,nl,rpart,nr,jps)
+         call crystal_tuple_sort    (i_cr_hndl,n  &
+                , ipart,ni,partl,nl,rpart,nr,je0,1)
+         pt_timers(6) = pt_timers(6) + dnekclock() - scrt_timers(6)
+      endif
+
+!     !for debug by keke
+!     print *,'after tuple_transfer'
+!     do i = 1, n
+!        print *, i, 'ipart(je0)', ipart(je0, i)
+!     enddo
+!     !end debug added by keke
+!        added by keke
+         print *, 'gpu nid: ', nid, '# particles: ', n
+!        end added by keke
+
+      scrt_timers(7) = dnekclock()
+      if(n.gt.0) then
+      !print *,'before copy2', nr, n
+      istate = cudaMemcpy(d_rpart,rpart,nr*n,cudaMemcpyHosttoDevice)
+      !print *,'before copy2', ni, n
+      istate = cudaMemcpy(d_ipart,ipart,ni*n,cudaMemcpyHosttoDevice)
+      !print *,'before baryweights'
+      call baryweights_findpts_eval_gpu2(d_rpart,nr,d_ipart,ni,n, &
+                d_vx,d_vy,d_vz)
+      !print *,'after bary weights'
+      !print *, "done gpu interp"
+      endif
+      pt_timers(7) = pt_timers(7) + dnekclock() - scrt_timers(7)
+      pt_timers(4) = pt_timers(4) + dnekclock() - scrt_timers(4)
+      return
+      end
+
+!-------------------------------------------------------------------
+!     subroutine transferParticlesToGPU(rpart, ipart)
+!-------------------------------------------------------------------
+      subroutine particles_in_nid_gpu2(d_fptsmap,d_rfpts,nrf,d_ifpts,  &
+                nif,nfpts,d_rpart,nr,d_ipart,ni,n,d_xerange)
+      include 'SIZE.cuf'
+      include 'PARALLEL.cuf'
+
+!      real    rpart(nr,n)
+!      integer ipart(ni,n)
+!
+!      real    rfpts(nrf,*)
+!      integer ifpts(nif,*),fptsmap(*)
+
+!      real   xerange(2,3,lelt)
+!      common /elementrange/ xerange
+      real, device :: d_rpart(nr,lpart) !changed by keke from lr to nr
+      integer, device :: d_ipart(li,lpart) !same as up
+      integer, device :: d_fptsmap(lpart)
+      real, device :: d_rfpts(nrf,lpart) !same as up
+      integer, device :: d_ifpts(nif,lpart) !same as up
+      real, device :: d_xerange(2,3,lelt)
+
+      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
+                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
+                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
+
+      nfpts = 0
+      !print *, "came here"
+      !print *, nrf, nif, nfpts, nr, ni, n, lpart, nelt
+      if(n.gt.0) then
+      call particles_in_nid_wrapper(d_rfpts, d_ifpts, d_rpart,  &
+                 d_ipart, d_xerange,  &
+                 d_fptsmap, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
+                jx, jy, jz, je0, jrc, jpt, jd, jr, nid)
+      endif
+      !print *, "finished came here"
+      return
+      end subroutine
+
+!-----------------------------------------------------------------------
+
+      subroutine baryweights_findpts_eval_gpu2(d_rpart,nr,d_ipart,ni,n, &
+                d_vx,d_vy,d_vz)
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'SOLN.cuf'
+      include 'PARALLEL.cuf'
+
+      real    rpart(nr,n)
+      integer ipart(ni,n)
+      real, device :: d_rpart(nr,n)
+      integer, device :: d_ipart(ni,n)
+      real, device :: d_vx(lx1,ly1,lz1,nelt)
+      real, device :: d_vy(lx1,ly1,lz1,nelt)
+      real, device :: d_vz(lx1,ly1,lz1,nelt)
+
+      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
+                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
+                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
+
+      common /BARYPARAMS/ xgll, ygll, zgll, wxgll, wygll, wzgll
+      real xgll(lx1), ygll(ly1), zgll(lz1),  &
+                wxgll(lx1), wygll(ly1), wzgll(lz1)
+
+
+      common /BARRYREP/ rep, bot
+      real              rep(lx1,ly1,lz1), bot
+
+      call baryweights_evalwrapper(d_rpart, d_ipart, d_vx, d_vy, d_vz, rep,  &
+                xgll, ygll,zgll, wxgll, wygll, wzgll, jr,  &
+                je0, ju0, lx1, n, nr, ni, nelt)
+
+      return
+      end subroutine
+
+!-----------------------------------------------------------------------
+      subroutine get_var_index(o_index, i_index)
+      integer o_index, i_index
+
+      if (i_index .LE. 5) then
+          o_index = i_index
+      else
+          o_index = 7 + i_index
+      endif
+      end subroutine
+
+!-----------------------------------------------------------------------
+      subroutine assign_fatface_gpu_array(fatface, gpu_array, assign_dir)
+      include 'SIZE.cuf'
+      include 'TSTEP.cuf'
+      include 'INPUT.cuf'
+      include 'MASS.cuf'
+      include 'SOLN.cuf'
+      include 'GEOM.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTTIMERS.cuf'
+      include 'DG.cuf'
+      include 'DEALIAS.cuf'
+
+      parameter (lfq=lx1*lz1*2*ldim*lelcmt,&
+                           heresize=nqq*3*lfq,hdsize=toteq*ldim*lfq)
+!     common /shareddata/ isGPU, num_sh, shArray(2, lelt*6)
+      integer isGPU, num_sh, num_cores, shArray(2, lelt*6)
+      common /shareddata/ isGPU, num_sh, num_cores, shArray
+
+      real fatface(heresize), gpu_array(10*num_sh*lx1*lx1)
+      integer assign_dir
+      integer shel, shef
+
+      igm=1
+      !print *,'nelt in assign:',nelt
+      num_vars = 10
+      do ivar=1, num_vars     ! a total of 10 variables exist in CMT-bone
+          !print *,'before my var'
+          call get_var_index(myvar,ivar)
+          !print *,'my var:',myvar
+          ivaroffset = (myvar - 1) * nelt * 2 * ndim * lx1 * lx1
+          do ish = 1, num_sh  ! number of shared entries
+              shel = mod(shArray(1, ish)-1,nelt)+1
+              shef = shArray(2, ish)
+
+              ffeloffset = ivaroffset + (shel - 1) * 2 * ndim * lx1 * lx1 + 1
+              ffstart = ffeloffset + lx1 * lx1 * (shef - 1)
+              !print *,'iter:',ivar,ish,ffstart,iqm
+              do k=1, lx1 * lx1
+                  if (assign_dir .eq. 1) then
+                      gpu_array(igm+k-1) = fatface(ffstart+k)
+                  else
+                      fatface(ffstart+k) = gpu_array(igm+k-1)
+                  endif
+              enddo
+              igm = igm+lx1 * lx1
+          enddo
+      enddo
+
+      end subroutine
+
+!------------------------------------------------------------------------------
+      subroutine nek_solve
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'PARALLEL.cuf'
+
+      integer isGPU, num_sh, num_cores, shArray(2, lelt*6)
+      common /shareddata/ isGPU, num_sh, num_cores, shArray
+
+      !print *, "number of cores", num_cores, NID
+
+      if (isGPU) then
+           print *, "Working on GPU", nid
+           call nek_solve_gpu
+      else
+           !print *, "Working on CPU"
+           call nek_solve_cpu
+      endif
+
+      end subroutine
+
+!----------------------------------------------------------------------
+      subroutine init_stokes_particles(rpart,nr,ipart,ni,n)
+      use cudafor
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'GEOM.cuf'
+
+      real, device :: d_xdrange(2,3)
+      real, device :: d_xerange(2,3,lelt)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      integer, device :: d_fptsmap(lpart)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)	
+
+      real    pt_timers(10), scrt_timers(10)
+      common /trackingtime/ pt_timers, scrt_timers
+
+!     xdrange - global domain boundary [min,max][x,y,z]
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+
+!     xerange - local domain (element) [min,max][x,y,z][element index]
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+
+      real npart_r
+      real    rpart(nr,lpart)
+      integer ipart(ni,lpart)
+      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
+                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
+                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
+
+      integer isGPU, num_sh, num_cores, shArray(2, lelt*6)
+      common /shareddata/ isGPU, num_sh, num_cores, shArray
+
+
+        call rzero(pt_timers,10)
+        call rzero(scrt_timers,10)
+!
+        call domain_size(xdrange(1,1),xdrange(2,1),xdrange(1,2) &
+                ,xdrange(2,2),xdrange(1,3),xdrange(2,3))
+
+        ntot = lx1*ly1*lz1*nelt
+
+        nxyz = lx1*ly1*lz1
+
+        do ie = 1,nelt
+           xerange(1,1,ie) = vlmin(xm1(1,1,1,ie),nxyz)
+           xerange(2,1,ie) = vlmax(xm1(1,1,1,ie),nxyz)
+           xerange(1,2,ie) = vlmin(ym1(1,1,1,ie),nxyz)
+           xerange(2,2,ie) = vlmax(ym1(1,1,1,ie),nxyz)
+           xerange(1,3,ie) = vlmin(zm1(1,1,1,ie),nxyz)
+           xerange(2,3,ie) = vlmax(zm1(1,1,1,ie),nxyz)
+        enddo
+
+      call set_part_pointers
+
+!     llpart = lpart
+      k  = 0
+      l  = 0
+
+!     number of particles, globally
+      nw = param(72)
+
+!     specify where
+      xstart = -0.900
+      ystart = -0.900
+      zstart = -0.900
+      xlen   = 1.800
+      ylen   = 1.800
+      zlen   = 1.800
+      dum = rand(-1)
+
+      if (isGPU) then !GPU
+            npart_r = nw - (num_cores - 1) * param(71) * nw / (num_cores -1)
+            start_pid = nw - npart_r + 1 
+            end_pid = nw
+      else !CPU
+            npart_r = 0.5 * nw / (num_cores -1)
+            start_pid = nid*npart_r + 1
+            end_pid = (nid + 1) * npart_r
+      endif
+
+      if ((end_pid-start_pid+1) .gt.llpart) then
+               write(6,*)'Not enough space to store more particles'
+               call exitt
+      endif
+
+      do i = start_pid, end_pid
+         dumx = ran2(2)
+         dumy = ran2(2)
+         dumz = ran2(2)
+         l=l+1  ! local count
+         rpart(jx ,l) = xstart + dumx*xlen  ! jx - x location
+         rpart(jy ,l) = ystart + dumy*ylen
+         rpart(jz ,l) = zstart + dumz*zlen
+         rpart(jf0,l) = 0.0           ! this is the body (resultant) force
+         rpart(jar,l) = 1e15          ! Tracer?1e15:stokes value
+         ipart(jai,l) = i          ! partid
+         k = k+1     ! Total count
+      enddo
+
+      lcount = l
+      npart=0
+      npart  = max(npart,lcount)
+      n = npart
+      !call interp_u_for_adv(rpart,nr,ipart,ni,n,vx,vy,vz)
+      call move_particles_inproc
+      return
+      end
+!----------------------------------------------------------------------

@@ -1,0 +1,3686 @@
+c----------------------------------------------------------------------
+c routine called in case of particle calls only in .usr file (i.e.,
+c  with nek5000 particles and not cmt-nek particles. must use 
+c  bdf/ext time integration. Otherwise, cmt-nek will not call this fxn.
+      subroutine stokes_particles
+      include 'SIZE'
+      include 'TOTAL'
+
+      if (istep.eq.0) then
+         call usr_particles_init
+      else
+         call usr_particles_solver
+      endif
+
+      if(mod(istep,iostep).eq.0.or. istep.eq.1) then
+         call usr_particles_io(istep)
+      endif
+      return
+      end
+c----------------------------------------------------------------------
+c     setup routines
+c----------------------------------------------------------------------
+      subroutine usr_particles_init
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CTIMER'
+      include 'CMTDATA'
+      include 'CMTPART'
+c     added by keke
+      common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+      integer gfirst, inoassignd, resetFindpts, pload
+c     end added by keke
+
+
+c     zero before anything happens
+      call rzero(ptdum,iptlen)
+      call rzero(pttime,iptlen)
+
+      ! begin timer
+      ptdum(1) = dnekclock()
+
+      nr   = lr     ! Mandatory for proper striding
+      ni   = li     ! Mandatory
+      nrgp = lrgp
+      nigp = ligp
+      nrf  = lrf
+      nif  = lif
+
+c     particle options
+      time_integ = 1         ! 0         = bdf/ext particle 
+                             !             with forcing and stokes drag
+                             !             with no corrections. 
+                             ! 1         = rk3 time integration
+                             ! 2         = bdf for time, PIEP model 
+                             !             with torque
+      bc_part    = 1         ! 0         = outflow on all boundaries
+                             ! 1         = periodic on all boundaries
+      two_way    = 0         ! 0         = no two-way coupling
+                             ! 1         = current two-way coupling
+c     red_interp = (lx1+1)/2 ! 0         = full spectral interpolation 
+      red_interp = 0         ! 0         = full spectral interpolation 
+                             ! (lx1+1)/2 = reduced interpolation but
+                             !             lx1 must be an odd number
+      part_force(1) =  1     ! [0,1]     = user specified force off/on
+      part_force(2) =  1     ! [-1,0,1]  = quasi-steady force off/on or
+                             !           = -1 => on but corrections off
+      part_force(3) =  0     ! [0,1]     = undisturbed force off/on
+      part_force(4) =  0     ! [0,1]     = inviscid unstead force off/on
+      time_delay    =  0   ! istep     = timestep to delay particles
+
+      call rzero(rpart,lr*llpart)
+      call izero(ipart,li*llpart)
+
+      call set_bounds_box
+      call set_part_pointers
+      call place_particles_limit                ! n initialized here
+      call output_particle_options
+c     if (two_way.eq.1) call point_to_grid_corr_init
+      call move_particles_inproc          ! initialize fp & cr comm handles
+         ntmp  = iglsum(n,1)
+         if (nid.eq.0) write(6,*) 'Passed move_particles_inproc'
+      call init_interpolation ! barycentric weights for interpolation
+         ntmp  = iglsum(n,1)
+         if (nid.eq.0) write(6,*) 'Passed init_interpolation'
+      if (two_way.eq.1) then
+         call compute_neighbor_el_proc    ! compute list of neigh. el. ranks 
+            ntmp  = iglsum(n,1)
+            if (nid.eq.0) write(6,*) 'Passed compute_neighbor_el_proc'
+         call particles_solver_nearest_neighbor ! nearest neigh
+            ntmp  = iglsum(n,1)
+            if (nid.eq.0) write(6,*) 'Passed particles_solver_nearest_n'
+         call spread_props_grid           ! put particle props on grid
+            ntmp  = iglsum(n,1)
+            if (nid.eq.0) write(6,*) 'Passed spread_props_grid'
+
+         do i = 1,param(75)
+            call interp_props_part_location ! interpolate
+            call correct_spl
+            call particles_solver_nearest_neighbor ! nearest neigh
+            call spread_props_grid           ! put particle props on grid
+            if (nid.eq.0) write(6,*) i,'Pre-SPL iteration'
+         enddo
+
+      endif
+
+      resetFindpts = 1
+      call reinitialize
+      call printVerify
+
+c     set local particle id
+      do i = 1, n
+         ipart(jpid2, i) = i
+      enddo
+
+
+      ! end timer 
+      pttime(1) = pttime(1) + dnekclock() - ptdum(1)
+
+      ntmp  = iglsum(n,1)
+      if (nid.eq.0) write(6,*) 'Passed usr_particles_init'
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine set_bounds_box
+c
+c     set domain and element bounds for a box geometry. Notice that
+c     this ONLY works with non curved elements.
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CTIMER'
+      include 'CMTTIMERS'
+      include 'CMTPART'
+
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+c     added by keke
+      common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+      integer gfirst, inoassignd, resetFindpts, pload
+c     end added by keke
+
+
+      ! begin timer
+      ptdum(2) = dnekclock()
+
+      !if(istep.eq.0.or.istep.eq.1)then
+      if((istep.eq.0) .or. (istep.eq.1) .or. (resetFindpts .eq. 1)) then !resetFindpts .eq. 0 added by keke
+c       a = 0.
+c       call rescale_x(xm1,-0.7,0.904)
+c       call rescale_x(ym1,0.,0.0401)
+c       call rescale_x(zm1,0.,0.0401)
+        call domain_size(xdrange(1,1),xdrange(2,1),xdrange(1,2)
+     $                  ,xdrange(2,2),xdrange(1,3),xdrange(2,3))
+        ntot = lx1*ly1*lz1*nelt
+        nxyz = lx1*ly1*lz1
+        do ie = 1,nelt
+           xerange(1,1,ie) = vlmin(xm1(1,1,1,ie),nxyz)
+           xerange(2,1,ie) = vlmax(xm1(1,1,1,ie),nxyz)
+           xerange(1,2,ie) = vlmin(ym1(1,1,1,ie),nxyz)
+           xerange(2,2,ie) = vlmax(ym1(1,1,1,ie),nxyz)
+           xerange(1,3,ie) = vlmin(zm1(1,1,1,ie),nxyz)
+           xerange(2,3,ie) = vlmax(zm1(1,1,1,ie),nxyz)
+        enddo  
+        if(nid .eq. 0) print *, "called set_bounds_box"
+      endif
+
+      ! end timer
+      pttime(2) = pttime(2) + dnekclock() - ptdum(2)
+
+      return
+      end
+
+c----------------------------------------------------------------------
+      subroutine place_particles_limit !limit lpart to make it not that large
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+
+c     integer nwe
+      real    dum,rxbo(2,3)
+
+c     integer nw
+c     common /particlenumber/ nw
+      integer gfirst, inoassignd, resetFindpts, pload
+      integer nwe, remainder, i, ip, e, nl, k, npass, m, j
+c     real px0, px1, py0, py1, pz0, pz1
+      integer nep, tnep, isIn(nelt)
+
+      ! begin timer
+      ptdum(3) = dnekclock()
+
+c     setup items
+      pi    = 4.0*atan(1.) ! pi
+      dum   = ran2(-nid-1) ! initialize random number generator
+      nxyze = nx1*ny1*nz1*nelt
+      call rzero(ptw,nxyze*4)
+
+c     user sets following parameters
+      nw        = param(72)  ! appox. number of particles total
+      rho_p     = 10  !25.        ! particle density 
+      mu_0      = 1.84113E-3 ! inital fluid dynamic viscosity
+      df_dp     = param(73)
+      df_dx     = param(74)
+      phi_desire= 0.6
+
+c     region to distribute particles
+      rxbo(1,1) = -1.0  !-0.38 ! xmin
+      rxbo(2,1) = -0.30 ! xmax
+      rxbo(1,2) = xdrange(1,2) ! ymin
+      rxbo(2,2) = xdrange(2,2) ! ymax
+      rxbo(1,3) = xdrange(1,3) ! zmin
+      rxbo(2,3) = xdrange(2,3) ! zmax
+
+c     some computed parameters
+c     nwe         = int(nw/np)                ! num. part per proc
+      deltax      = (xerange(2,1,1) - xerange(1,1,1))/nx1
+      deltaf      = df_dx*deltax                 ! gaussian filter half
+      dp          = deltaf/df_dp                 ! particle diameter
+      rsig        = deltaf/(2.*sqrt(2.*log(2.))) ! gaussian filter std.
+      tau_p       = dp**2*rho_p/18.0d+0/mu_0  ! part. time scale stokes
+      vol_distrib = (rxbo(2,1)-rxbo(1,1))*(rxbo(2,2)-rxbo(1,2))*
+     >              (rxbo(2,3)-rxbo(1,3))
+
+      dp = 100E-6
+      tau_p = 20.*dt
+      mu_0 = 1.84113E-5
+      rho_p = mu_0*18.*tau_p/dp**2   
+c     correct nwe if discrepancy
+c     nw_tmp      = iglsum(nwe,1)
+c     if ((nw_tmp .ne. nw) .and. (nid.eq.0)) nwe = nwe + (nw - nw_tmp)
+
+c     for each processor, iterate over element to count how
+c      many elements in this subdomain
+      nep = 0 !#elements that has particles
+      call izero(isIn, nelt)
+      do i = 1, nelt
+         if(
+     >     ((xerange(1,1,i) .ge. rxbo(1,1) .and.
+     >        xerange(1,1,i) .lt. rxbo(2,1))
+     >.or.(xerange(2,1,i) .gt. rxbo(1,1) .and. 
+     >        xerange(2,1,i) .le. rxbo(2,1)))
+     >       .and.
+     >    ((xerange(1,2,i) .ge. rxbo(1,2) .and.
+     >        xerange(1,2,i) .lt. rxbo(2,2))
+     >.or.(xerange(2,2,i) .gt. rxbo(1,2) .and. 
+     >        xerange(2,2,i) .le. rxbo(2,2)))
+     >       .and.
+     >    ((xerange(1,3,i) .ge. rxbo(1,3) .and.
+     >        xerange(1,3,i) .lt. rxbo(2,3))
+     >.or.(xerange(2,3,i) .gt. rxbo(1,3) .and. 
+     >        xerange(2,3,i) .le. rxbo(2,3)))
+     >                                                          ) then
+           nep = nep + 1
+           isIn(i) = 1
+         endif
+c        print *, nid, i, xerange(1,1,i), xerange(2,1,i),
+c    $     xerange(1,2,i), xerange(2,2,i), xerange(1,3,i),
+c    $     xerange(2,3,i), isin
+      enddo
+      if(nid .eq. 0) print *, nid, 'nelt',nelt, 'nep',nep
+      tnep = iglsum(nep, 1)! get the total #elements that has particles
+      if(nid .eq. 0) print *,'after', nid, 'nelt', nelt,'tnep',tnep
+
+c     call srand(7086+nid*1000)
+      nwe = nw/tnep !#particles in each elemt
+      k = 0
+      if(nep .gt. 0) then!for the proc that has elements in the particle area
+        do i = 1, nelt
+           if(isIn(i) .ne. 0) then
+           do j=1, nwe
+            k = k+1
+            if (k.gt.llpart)then 
+               write(6,*)'Not enough space to store more particles'
+               call exitt
+            endif
+
+            do m=0,2
+               dum = ran2(2)
+               rval = xerange(1,m+1,i)+dum*(xerange(2,m+1,i)
+     $                  -xerange(1,m+1,i))
+               rpart(jx+m,k)  = rval
+               rpart(jx1+m,k) = rval
+               rpart(jx2+m,k) = rval
+               rpart(jx3+m,k) = rval
+            enddo
+
+c           set some rpart values for later use
+            rpart(jtaup,k) = tau_p      ! particle time scale
+            rpart(jdp,k)   = dp         ! particle diameter
+            rpart(jrhop,k) = rho_p      ! material density of particle
+            rpart(jvol,k)  = pi*rpart(jdp,k)**3/6.! particle volume
+c           rpart(jspl,k)  = 1.         ! super particle loading
+            rpart(jspl,k)  = phi_desire*vol_distrib/(nw*rpart(jvol,k))
+
+c        set global particle id (3 part tag)
+            ipart(jpid1,k) = nid
+            ipart(jpid2,k) = k
+            ipart(jpid3,k) = 0
+
+
+c     print *, "nid: ", nid, 'particle : ',k, rpart(jx, k),
+c    >                         rpart(jy, k), rpart(jz, k)
+
+           enddo
+           endif
+        enddo
+      endif
+
+      n = nwe * nep
+      if(n .ne. k) then
+         print *, "Error in place_particle: n!=k,, nid=", nid
+      endif
+      nw = iglsum(n,1)
+      if(nid .eq. 0) print *,'nw',nw
+
+c     if (nep.ne.0) write(6,*) 'nid:', nid, 'value:',
+c    >                phi_desire*vol_distrib/(nw*rpart(jvol,n))
+
+c     check if zstart and zlen is alright for a 2d case
+      if (.not. if3d) then
+          if (abs(zstart-1.0) .gt. 1E-16) then
+             write(6,*)'***particle zstart is not right for 2d case'
+             call exitt
+          elseif(abs(zlen) .gt. 1E-16) then
+             write(6,*)'***particle zlen is not right for 2d case'
+             call exitt
+         endif
+      endif
+
+      ! end timer
+      pttime(3) = pttime(3) + dnekclock() - ptdum(3)
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine place_particles
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+
+      integer nwe
+      real    dum,rxbo(2,3)
+
+c     integer nw
+c     common /particlenumber/ nw
+      integer gfirst, inoassignd, resetFindpts, pload
+
+      ! begin timer
+      ptdum(3) = dnekclock()
+
+c     setup items
+      pi    = 4.0*atan(1.) ! pi
+      dum   = ran2(-nid-1) ! initialize random number generator
+      nxyze = nx1*ny1*nz1*nelt
+      call rzero(ptw,nxyze*4)
+
+c     user sets following parameters
+      nw        = param(72)  ! appox. number of particles total
+      rho_p     = 25.        ! particle density 
+      mu_0      = 1.84113E-3 ! inital fluid dynamic viscosity
+      df_dp     = param(73)
+      df_dx     = param(74)
+      phi_desire= 0.6
+
+c     region to distribute particles
+      rxbo(1,1) = -0.64 ! xmin
+      rxbo(2,1) = -0.30 ! xmax
+      rxbo(1,2) = xdrange(1,2) ! ymin
+      rxbo(2,2) = xdrange(2,2) ! ymax
+      rxbo(1,3) = xdrange(1,3) ! zmin
+      rxbo(2,3) = xdrange(2,3) ! zmax
+
+c     some computed parameters
+      nwe         = int(nw/np)                ! num. part per proc
+      deltax      = (xerange(2,1,1) - xerange(1,1,1))/nx1
+      deltaf      = df_dx*deltax                 ! gaussian filter half
+      dp          = deltaf/df_dp                 ! particle diameter
+      rsig        = deltaf/(2.*sqrt(2.*log(2.))) ! gaussian filter std.
+      tau_p       = dp**2*rho_p/18.0d+0/mu_0  ! part. time scale stokes
+      vol_distrib = (rxbo(2,1)-rxbo(1,1))*(rxbo(2,2)-rxbo(1,2))*
+     >              (rxbo(2,3)-rxbo(1,3))
+
+c     correct nwe if discrepancy
+      nw_tmp      = iglsum(nwe,1)
+      if ((nw_tmp .ne. nw) .and. (nid.eq.0)) nwe = nwe + (nw - nw_tmp)
+
+c     main loop to distribute particles
+      n = 0
+      do i = 1,nwe
+         n = n + 1
+         if (n.gt.llpart)then 
+            write(6,*)'Not enough space to store more particles'
+            call exitt
+         endif
+
+         do j=0,2
+            dum = ran2(2)
+            rval = rxbo(1,j+1)+dum*(rxbo(2,j+1)-rxbo(1,j+1))
+            rpart(jx+j,n)  = rval
+            rpart(jx1+j,n) = rval
+            rpart(jx2+j,n) = rval
+            rpart(jx3+j,n) = rval
+         enddo
+
+c        set some rpart values for later use
+         rpart(jtaup,n) = tau_p      ! particle time scale
+         rpart(jdp,n)   = dp         ! particle diameter
+         rpart(jrhop,n) = rho_p      ! material density of particle
+         rpart(jvol,n)  = pi*rpart(jdp,n)**3/6.! particle volume
+c        rpart(jspl,n)  = 1.         ! super particle loading
+         rpart(jspl,n)  = phi_desire*vol_distrib/(nw*rpart(jvol,n))
+
+c        set global particle id (3 part tag)
+         ipart(jpid1,n) = nid 
+         ipart(jpid2,n) = n 
+         ipart(jpid3,n) = 0
+      enddo
+
+      if (nid.eq.0) write(6,*) 'value:',
+     >                phi_desire*vol_distrib/(nw*rpart(jvol,n))
+
+c     check if zstart and zlen is alright for a 2d case
+      if (.not. if3d) then
+          if (abs(zstart-1.0) .gt. 1E-16) then
+             write(6,*)'***particle zstart is not right for 2d case'
+             call exitt
+          elseif(abs(zlen) .gt. 1E-16) then
+             write(6,*)'***particle zlen is not right for 2d case'
+             call exitt
+         endif
+      endif
+
+      ! end timer
+      pttime(3) = pttime(3) + dnekclock() - ptdum(3)
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine set_part_pointers
+      include 'SIZE'
+      include 'CMTPART'
+
+      ! begin timer
+      ptdum(4) = dnekclock()
+
+c     ipart pointers ------------------------------------------------
+      jrc   = 1 ! Pointer to findpts return code
+      jpt   = 2 ! Pointer to findpts return processor id
+      je0   = 3 ! Pointer to findpts return element id
+      jps   = 4 ! Pointer to proc id for data swap
+      jpid1 = 5 ! initial proc number
+      jpid2 = 6 ! initial local particle id
+      jpid3 = 7 ! initial time step introduced
+      jpnn  = 8 ! initial time step introduced
+      jpid  = 9 ! initial time step introduced
+      jai   = 10 ! Pointer to auxiliary integers
+
+      nai = ni - (jai-1)  ! Number of auxiliary integers
+      if (nai.le.0) call exitti('Error in nai:$',ni)
+
+c     rpart pointers ------------------------------------------------
+      jr  = 1         ! Pointer to findpts return rst variables
+      jd  = jr + 3    ! Pointer to findpts return distance
+      jx  = jd + 1    ! Pointer to findpts input x value
+      jy  = jx + 1    ! Pointer to findpts input y value
+      jz  = jy + 1    ! Pointer to findpts input z value
+      jv0 = jz + 1    ! particle velocity at this timestep
+      ju0 = jv0 + 3   ! fluid velocity at this time step
+      jf0 = ju0 + 3   ! particle total force at this timestep
+
+c     forcing
+      ii  = jf0 + 3
+      if (part_force(1).ne.0) then ! user specified force
+         jfusr = ii
+         ii    = ii + 3
+      endif
+      if (part_force(2).ne.0) then ! quasi-steady force
+         jfqs  = ii
+         ii    = ii + 3
+      endif
+      if (part_force(3).ne.0) then ! undisturbed force
+         jfun  = ii
+         ii    = ii + 3
+      endif
+      if (part_force(4).ne.0) then ! inviscid unsteady force
+         jfiu  = ii
+         ii    = ii + 3
+      endif
+
+c     other parameters (some may not be used; all at part. location)
+      jtaup   = ii          ! particle time scale
+      jcd     = jtaup   + 1 ! drag coeff
+      jdrhodt = jcd     + 3 ! density material time derivative
+      jre     = jdrhodt + 1 ! Relative Reynolds number
+      jDuDt   = jre     + 1 ! fluid velocity time derivative
+      jtemp   = jDuDt   + 3 ! part. temperature (assume same as fluid)
+      jrho    = jtemp   + 1 ! fluid denisty 
+      jrhop   = jrho    + 1 ! particle material density
+      ja      = jrhop   + 1 ! fluid mach number
+      jvol    = ja      + 1 ! particle volume 
+      jvol1   = jvol    + 1 ! particle volume fraction at part. loc.
+      jdp     = jvol1   + 1 ! particle diameter
+      jgam    = jdp     + 1 ! spread to grid correction
+      jspl    = jgam    + 1 ! super particle loading
+
+c     bdf/ext integration
+      jx1 = jspl+1 ! Pointer to xyz at t^{n-1}
+      jx2 = jx1 +3 ! Pointer to xyz at t^{n-1}
+      jx3 = jx2 +3 ! Pointer to xyz at t^{n-1}
+
+      jv1 = jx3+ 3 ! Pointer to particle velocity at t^{n-1}
+      jv2 = jv1+ 3 ! Pointer to particle velocity at t^{n-2}
+      jv3 = jv2+ 3 ! Pointer to particle velocity at t^{n-3}
+
+      ju1 = jv3+ 3 ! Pointer to fluid velocity at t^{n-1}
+      ju2 = ju1+ 3 ! Pointer to fluid velocity at t^{n-2}
+      ju3 = ju2+ 3 ! Pointer to fluid velocity at t^{n-3}
+
+      jar = ju3+ 3 ! Pointer to auxiliary reals
+
+      nar = nr - (jar-1)  ! Number of auxiliary reals
+      if (nar.le.0) call exitti('Error in nar:$',nr)
+
+c     ghost particle integer pointers -------------------------------
+      jgppid1 = 1 ! initial proc number
+      jgppid2 = 2 ! initial local particle id
+      jgppid3 = 3 ! initial time step introduced
+      jgpps   = 4 ! Pointer to proc id for data swap
+      jgppt   = 5 ! findpts return processor id
+      jgpes   = 6 ! Destination element to be sent to
+
+c     ghost particle real pointers ----------------------------------
+      jgpx    = 1 ! ghost particle xloc
+      jgpy    = 2 ! ghost particle yloc
+      jgpz    = 3 ! ghost particle zloc
+      jgpfh   = 4 ! ghost particle hydrodynamic xforce (i+1 > y, i+2 > z)
+      jgpvol  = jgpfh+3  ! ghost particle volume
+      jgpgam  = jgpvol+1 ! spreading correction (if used)
+      jgpspl  = jgpgam+1 ! super particle loading
+
+      ! end timer
+      pttime(4) = pttime(4) + dnekclock() - ptdum(4)
+
+      return
+      end
+c----------------------------------------------------------------------
+c     particle force routines
+c----------------------------------------------------------------------
+      subroutine usr_particles_solver
+c
+c     call routines in ordered way - main solver structure
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      integer icalld
+      save    icalld
+      data    icalld  /-1/
+
+      ! begin timer
+      ptdum(5) = dnekclock()
+
+      if (istep .gt. time_delay) then
+
+c     bdf/ext integration ---------------------------------------------
+      if (time_integ .eq. 0) then           
+         if (icalld .ne. istep) then
+            call update_particle_location   ! move outlier particles
+            call move_particles_inproc      ! update mpi rank
+            call interp_props_part_location ! interpolate
+            call usr_particles_forces       ! fluid to part. forcing
+            call update_vel_and_pos_bdf     ! time integration
+            call compute_forces_post_part   ! update forces
+            if (two_way.eq.1) then          ! part. to fluid forcing
+               call particles_solver_nearest_neighbor ! nn
+               call spread_props_grid       ! put particle props on grid
+            endif
+
+            icalld = istep
+         endif
+c     rk3 integration -------------------------------------------------
+      elseif (time_integ .eq. 1) then       
+         if (stage.eq.1) then
+            call set_bounds_box
+            call update_particle_location   ! move outlier particles
+            call move_particles_inproc      ! update mpi rank
+         endif
+         call interp_props_part_location    ! interpolate
+         call usr_particles_forces          ! fluid to part. forcing
+         call update_vel_and_pos_rk3        ! time integration
+         call compute_forces_post_part ! update forces
+         if (two_way.eq.1) then             ! part. to fluid forcing
+            call particles_solver_nearest_neighbor    ! nn
+            call spread_props_grid          ! put particle props on grid
+         endif
+
+      
+c     load balance------------------------------------------------------------
+      elseif (time_integ .eq. 2) then ! load balancing
+         if (icalld .ne. istep) then
+             timet = DNEKCLOCK()
+            call set_bounds_box
+            if (nid .eq. 0) print *, "set_bounds_box",
+     $         dnekclock()-timet
+             timet = dnekclock()
+
+            call update_particle_location   ! move outlier particles
+c           if (nid .eq. 0) print *, "update_particle_location",
+c    $         dnekclock()-timet
+c            timet = dnekclock()
+
+            call move_particles_inproc      ! update mpi rank
+c            if (nid .eq. 0) print *, "move_particles_inproc",
+c    $         dnekclock()-timet
+c            timet = dnekclock()
+
+            call interp_props_part_location ! interpolate
+c             if (nid .eq. 0) print *, "interp_props_part_location",
+c    $         dnekclock()-timet, nid, n
+c             timet = dnekclock()
+
+            call update_vel_and_pos_lb    ! time integration
+c            if (nid .eq. 0) print *, "update_vel_and_pos_lb",
+c    $         dnekclock()-timet
+c            timet = dnekclock()
+
+c           if (mod(nid,100).eq.1) then
+c               print *, 'nid: ', nid, '# particles: ', n
+c    $         , nelt, nelt*640+n
+c           endif 
+
+            icalld = istep
+         endif
+      endif
+
+      endif
+
+      ntmp = iglsum(n,1) ! collective communication call to sync up
+      ! end timer
+      pttime(5) = pttime(5) + dnekclock() - ptdum(5)
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine correct_spl
+c
+c     correct initial super particle loading
+c
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'CMTDATA'
+      include 'MASS'
+      include 'CMTPART'
+
+
+         call usr_particles_io(istep)
+
+      rdum = 0.
+      do ip=1,n
+         rdum = rdum + rpart(jvol1,ip)/param(72)
+      enddo
+      rmu = glsum(rdum,1)
+
+      rdum = 0.
+      do ip=1,n
+         rdum = rdum + 1./param(72)*(rpart(jvol1,ip)-rmu)**2
+      enddo
+      rvar = glsum(rdum,1)
+      rstd = sqrt(rvar)
+
+      rdum = 0.
+      do ip=1,n
+         rdum = rdum + rpart(jspl,ip)/param(72)
+      enddo
+      rtmp = glsum(rdum,1)
+
+      if (nid.eq.0) write(6,*)'Volume frac[mu,std]:',rmu,rstd,rtmp
+
+      do ip=1,n
+c        if (icalld .gt. 1) then
+c        if (rvols(ip).lt.0.55)then
+c           goto 1512
+c        endif
+c        endif
+
+         rtmp = 0.1*rpart(jspl,ip)
+         rxi = rtmp*(1. - rpart(jvol1,ip)/phi_desire)
+         rpart(jspl,ip)=rpart(jspl,ip) + rxi
+      enddo
+
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine spread_props_grid
+c
+c     spread particle properties at fluid grid points
+c
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'CMTDATA'
+      include 'MASS'
+      include 'TSTEP'
+      include 'CMTPART'
+
+      real    xx,yy,zz,vol,pfx,pfy,pfz,pmass,pmassf,vcell,spl,multfc
+      integer e
+
+      ! begin timer
+      ptdum(6) = dnekclock()
+
+      pi       = 4.0d+0*atan(1.0d+0)
+      multfc   = 1./(sqrt(2.*pi)**3 * rsig**3)
+      rbexp    = -2.*rsig**2
+
+      nxyze = lx1*ly1*lz1*lelt
+      call rzero(ptw,nxyze*4)
+
+c     local mpi rank effects
+      do ip=1,n
+         e   = ipart(je0,ip) + 1
+         xx  = rpart(jx,ip)
+         yy  = rpart(jy,ip)
+         zz  = rpart(jz,ip)
+         pfx = -rpart(jf0,ip)*multfc
+         pfy = -rpart(jf0+1,ip)*multfc
+         pfz = -rpart(jf0+2,ip)*multfc
+         vol = rpart(jvol,ip)*multfc
+         spl = rpart(jspl,ip)
+
+c        call local_part_to_grid(e,ptw(1,1,1,1,1),spl*pfx,
+c    >                           xx,yy,zz,rbexp)
+c        call local_part_to_grid(e,ptw(1,1,1,1,2),spl*pfy,
+c    >                           xx,yy,zz,rbexp)
+c        call local_part_to_grid(e,ptw(1,1,1,1,3),spl*pfz,
+c    >                           xx,yy,zz,rbexp)
+         call local_part_to_grid(e,ptw(1,1,1,1,4),spl*vol,
+     >                           xx,yy,zz,rbexp)
+      enddo
+
+c     ntmp1 = iglmax(n,1)
+c     ntmp2 = iglmax(nfptsgp,1)
+c     if (nid.eq.0) write(6,*) 'Passed local spreading to grid'
+c    >                                                     ,ntmp1,ntmp2
+
+c     remote mpi rank effects
+      do ip=1,nfptsgp
+         e   = iptsgp(jgpes,ip) + 1
+         xx  = rptsgp(jgpx,ip)
+         yy  = rptsgp(jgpy,ip)
+         zz  = rptsgp(jgpz,ip)
+         pfx = -rptsgp(jgpfh,ip)*multfc
+         pfy = -rptsgp(jgpfh+1,ip)*multfc
+         pfz = -rptsgp(jgpfh+2,ip)*multfc
+         vol = rptsgp(jgpvol,ip)*multfc
+         spl = rptsgp(jgpspl,ip)
+
+c        call remote_part_to_grid(e,ptw(1,1,1,1,1),spl*pfx,
+c    >                            xx,yy,zz,rbexp)
+c        call remote_part_to_grid(e,ptw(1,1,1,1,2),spl*pfy,
+c    >                            xx,yy,zz,rbexp)
+c        call remote_part_to_grid(e,ptw(1,1,1,1,3),spl*pfz,
+c    >                            xx,yy,zz,rbexp)
+         call remote_part_to_grid(e,ptw(1,1,1,1,4),spl*vol,
+     >                            xx,yy,zz,rbexp)
+      enddo
+
+c     ntmp = iglsum(n,1)
+c     if (nid.eq.0) write(6,*) 'Passed remote spreading to grid'
+
+c     set fluid volume fraction
+c     do i=1,nxyze
+c        phig(i,1,1,1) = 1 - ptw(i,1,1,1,4)
+c     enddo
+
+      ! end timer
+      pttime(6) = pttime(6) + dnekclock() - ptdum(6)
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine local_part_to_grid(e,fvalg,pvalp,xx,yy,zz,rbexp)
+c
+c     spread a local particle property to local fluid grid points
+c
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      integer e,er
+      real    fvalg(lx1,ly1,lz1,lelt),pvalp,xx,yy,zz
+
+      ! begin timer
+      ptdum(7) = dnekclock()
+
+c     this element
+      call point_to_grid(fvalg(1,1,1,e),pvalp,xx,yy,zz,
+     >      xm1(1,1,1,e),ym1(1,1,1,e),zm1(1,1,1,e),rbexp)
+
+c     faces
+      do ii=1,nfacegp
+         er=el_face_el_map(e,ii) + 1
+         impi=el_face_proc_map(e,ii)
+         if (impi .eq. nid) 
+     >      call point_to_grid(fvalg(1,1,1,er),pvalp,xx,yy,zz,
+     >      xm1(1,1,1,er),ym1(1,1,1,er),zm1(1,1,1,er),rbexp)
+      enddo
+
+c     edges
+      do ii=1,nedgegp
+         er=el_edge_el_map(e,ii) + 1
+         impi=el_edge_proc_map(e,ii)
+         if (impi .eq. nid)
+     >      call point_to_grid(fvalg(1,1,1,er),pvalp,xx,yy,zz,
+     >      xm1(1,1,1,er),ym1(1,1,1,er),zm1(1,1,1,er),rbexp)
+      enddo
+
+c     corners
+      do ii=1,ncornergp
+         er=el_corner_el_map(e,ii) + 1
+         impi=el_corner_proc_map(e,ii)
+         if (impi .eq. nid) 
+     >      call point_to_grid(fvalg(1,1,1,er),pvalp,xx,yy,zz,
+     >      xm1(1,1,1,er),ym1(1,1,1,er),zm1(1,1,1,er),rbexp)
+      enddo
+
+      ! end timer
+      pttime(7) = pttime(7) + dnekclock() - ptdum(7)
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine remote_part_to_grid(e,fvalg,pvalp,xx,yy,zz,rbexp)
+c
+c     spread a remote particle property to local fluid grid points
+c
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      integer e
+      real    fvalg(lx1,ly1,lz1,lelt),pvalp,xx,yy,zz
+
+      ! begin timer
+      ptdum(8) = dnekclock()
+
+      call point_to_grid(fvalg(1,1,1,e),pvalp,xx,yy,zz,
+     >      xm1(1,1,1,e),ym1(1,1,1,e),zm1(1,1,1,e),rbexp)
+
+      ! end timer
+      pttime(8) = pttime(8) + dnekclock() - ptdum(8)
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine point_to_grid(gval,pval,xx,yy,zz,xgd,ygd,zgd,rbexp)
+c
+c     spreads point onto grid in element e
+c       gval: grid value
+c       pval: particle value
+c
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      integer i,j,k,e,ip
+      real    gval(lx1,ly1,lz1),pval,pi,distx,disty,distz
+      real    xx,yy,zz,distx2,disty2,distz2,multfc
+
+      real xgd(lx1,ly1,lz1),ygd(lx1,ly1,lz1),zgd(lx1,ly1,lz1)
+
+      ! begin timer
+      ptdum(9) = dnekclock()
+
+      ralph    = d2chk(1)     ! assume all directions same!
+
+c     optimized code ------------------------------------------------
+c     can we skip this element?
+      rxl      = abs(xx - xgd(1,1,1))
+      rxr      = abs(xx - xgd(nx1,1,1))
+      if (rxl.gt.ralph .and. rxr.gt.ralph) goto 1514
+      rxl      = abs(yy - ygd(1,1,1))
+      rxr      = abs(yy - ygd(1,ny1,1))
+      if (rxl.gt.ralph .and. rxr.gt.ralph) goto 1514
+      rxl      = abs(zz - zgd(1,1,1))
+      rxr      = abs(zz - zgd(1,1,nz1))
+      if (rxl.gt.ralph .and. rxr.gt.ralph) goto 1514
+
+      do k=1,nz1
+         distz = zz - zgd(1,1,k) ! even element spacing only!
+         if (abs(distz) .gt. ralph) goto 1513
+         distz2 = distz**2
+      do j=1,ny1
+         disty = yy - ygd(1,j,1) ! even element spacing only!
+         if (abs(disty) .gt. ralph) goto 1512
+         disty2 = disty**2
+      do i=1,nx1
+         distx = xx - xgd(i,1,1) ! even element spacing only!
+         if (abs(distx) .gt. ralph) goto 1511
+         distx2 = distx**2
+
+         rdist2 = distx2 + disty2 + distz2
+         if (sqrt(rdist2) .gt. ralph) goto 1511
+
+         gval(i,j,k) = gval(i,j,k) + pval*exp(rdist2/rbexp)
+ 1511 continue
+      enddo
+ 1512 continue
+      enddo
+ 1513 continue
+      enddo
+ 1514 continue
+
+c     non-optimized code --------------------------------------------
+c     pi = 4.0d+0*atan(1.0d+0)
+c     do k=1,nz1
+c     do j=1,ny1
+c     do i=1,nx1
+c        rdist2 = (xx - xgd(i,j,k))**2 + (yy - ygd(i,j,k))**2 +
+c    >            (zz - zgd(i,j,k))**2
+
+c        multfc      = 1./(sqrt(pi)**3 * rsig**3) ! only used for time
+c        gval(i,j,k) = gval(i,j,k) + pval*exp(-rdist2/2./rsig**2)
+c     enddo
+c     enddo
+c     enddo
+
+      ! end timer
+      pttime(9) = pttime(9) + dnekclock() - ptdum(9)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine update_vel_and_pos_lb
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+c     Solve for velocity at time t^n
+c     update x velocity
+c     do i=1,n
+c        rpart(jv,i) = 1./3.*rpart(jx,i)
+c        rpart(jx,i) = rpart(jx,i) + 1.0/3.*rpart(jx,i)*dt
+c        print *, "nid: ", nid, 'particle', i,': ', rpart(jx, i),
+c    >                         rpart(jy, i), rpart(jz, i),
+c    >               rpart(jx,i) + 1.0/3.*rpart(jx,i)*dt
+c     enddo
+
+c     update y velocity
+      do i=1,n
+         rpart(jv+1,i) = 1./3.*rpart(jy,i)
+         rpart(jy,i) = rpart(jy,i) + 1.0/3.*rpart(jy,i)*dt
+      enddo
+      
+c     if (n .gt. 0) then
+c     print *, "nid: ", nid, 'particle 1: ', rpart(jx, 1),
+c    >                         rpart(jy, 1), rpart(jz, 1),
+c    >               rpart(jx,1) + 1.0/3.*rpart(jx,1)*dt, n
+c     endif
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine update_vel_and_pos_bdf
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      common /myparts/ times(0:3),alpha(0:3),beta(0:3)
+      
+      real s,pmass
+
+      ! begin timer
+      ptdum(10) = dnekclock()
+
+      call get_bdf_ext_coefs(beta,alpha,times)
+
+      jx0 = jx
+c     move data to previous positions
+      do j=0,ndim-1
+      do i=1,n
+         rpart(ju3+j,i)=rpart(ju2+j,i)
+         rpart(ju2+j,i)=rpart(ju1+j,i)
+         rpart(ju1+j,i)=rpart(ju0+j,i)
+         rpart(jv3+j,i)=rpart(jv2+j,i)
+         rpart(jv2+j,i)=rpart(jv1+j,i)
+         rpart(jv1+j,i)=rpart(jv0+j,i)
+         rpart(jx3+j,i)=rpart(jx2+j,i)
+         rpart(jx2+j,i)=rpart(jx1+j,i)
+         rpart(jx1+j,i)=rpart(jx0+j,i)
+      enddo
+      enddo
+
+c     Solve for velocity at time t^n
+      do i=1,n
+        s     = 1./rpart(jtaup,i) ! stokes number inverse
+        do j=0,ndim-1
+          rhs = s*( alpha(1)*rpart(ju1+j,i)
+     $            + alpha(2)*rpart(ju2+j,i)
+     $            + alpha(3)*rpart(ju3+j,i)) + rpart(jf0+j,i)
+     $        +     beta (1)*rpart(jv1+j,i)
+     $        +     beta (2)*rpart(jv2+j,i)
+     $        +     beta (3)*rpart(jv3+j,i)
+          rpart(jv0+j,i) = rhs / (beta(0)+s) ! Implicit solve for v
+          rhx = beta (1)*rpart(jx1+j,i)
+     $        + beta (2)*rpart(jx2+j,i)
+     $        + beta (3)*rpart(jx3+j,i) + rpart(jv0+j,i)
+          rpart(jx0+j,i) = rhx / beta(0)     ! Implicit solve for x
+        enddo
+        print *, 'nid:',nid, 'i', i, rpart(jx0,i),rpart(jx0+1,i),
+     $             rpart(jx0+2,i)
+      enddo
+
+      ! end timer
+      pttime(10) = pttime(10) + dnekclock() - ptdum(10)
+      
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine update_vel_and_pos_rk3
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      common /myparts/ times(0:3),alpha(0:3),beta(0:3)
+
+      common /PARTRK3/ kv_stage_p, kx_stage_p
+      real   kv_stage_p(llpart,4,ldim), kx_stage_p(llpart,4,ldim)
+
+      integer fdim
+      real    pmass
+
+      ! begin timer
+      ptdum(11) = dnekclock()
+
+      jx0 = jx
+
+c     rk3 stage one items ---------------------------------------------
+      if (stage.eq.1) then
+c        used for time derivative of v in iu force
+         call get_bdf_ext_coefs(beta,alpha,times)
+
+c        move data to previous positions
+         do j=0,ndim-1
+         do i=1,n
+            rpart(ju3+j,i)=rpart(ju2+j,i)
+            rpart(ju2+j,i)=rpart(ju1+j,i)
+            rpart(ju1+j,i)=rpart(ju0+j,i)
+            rpart(jv3+j,i)=rpart(jv2+j,i)
+            rpart(jv2+j,i)=rpart(jv1+j,i)
+            rpart(jv1+j,i)=rpart(jv0+j,i)
+            rpart(jx3+j,i)=rpart(jx2+j,i)
+            rpart(jx2+j,i)=rpart(jx1+j,i)
+            rpart(jx1+j,i)=rpart(jx0+j,i)
+         enddo
+         enddo
+
+         do i=1,n
+         do fdim=0,ndim-1
+            kv_stage_p(i,1,fdim+1) = rpart(jv0+fdim,i)
+            kx_stage_p(i,1,fdim+1) = rpart(jx0+fdim,i)
+         enddo
+         enddo
+      endif
+
+c     all rk3 stages items --------------------------------------------
+c     notice that I don't think primitive vars are updated at every
+c     rk3 stage, so its not technically correct.
+      do i=1,n
+         do fdim=0,ndim-1
+            kv_stage_p(i,stage+1,fdim+1) = rpart(jf0+fdim,i)
+            kx_stage_p(i,stage+1,fdim+1) = rpart(jv0+fdim,i)
+c           kx_stage_p(i,stage+1,fdim+1) = 
+c    >            tcoef(1,stage)*kx_stage_p(i,1,fdim+1)
+c    >          + tcoef(2,stage)*kx_stage_p(i,stage,fdim+1)
+c    >          + tcoef(3,stage)*kv_stage_p(i,stage,fdim+1)
+c           kv_stage_p(i,stage+1,fdim+1) =
+c    >            tcoef(1,stage)*kv_stage_p(i,1,fdim+1)
+c    >          + tcoef(2,stage)*kv_stage_p(i,stage,fdim+1)
+c    >          + tcoef(3,stage)*rpart(jf0+fdim,i)
+         enddo
+      enddo
+
+c     rk3 stage three items -------------------------------------------
+      if (stage.eq.3) then
+      fmfac = 1.0*dt/6.0
+      do i=1,n
+      do fdim=0,ndim-1
+c        rpart(jx0+fdim,i) = kx_stage_p(i,stage+1,fdim+1)
+c        rpart(jv0+fdim,i) = kv_stage_p(i,stage+1,fdim+1)
+         rpart(jx0+fdim,i) =     kx_stage_p(i,1,fdim+1) + fmfac*
+     >                      (    kx_stage_p(i,2,fdim+1) + 
+     >                       4.0*kx_stage_p(i,3,fdim+1) +
+     >                           kx_stage_p(i,4,fdim+1)        )
+         rpart(jv0+fdim,i) =     kv_stage_p(i,1,fdim+1) + fmfac*
+     >                      (    kv_stage_p(i,2,fdim+1) + 
+     >                       4.0*kv_stage_p(i,3,fdim+1) +
+     >                           kv_stage_p(i,4,fdim+1)        )
+      enddo
+      enddo
+      endif
+
+      ! end timer
+      pttime(11) = pttime(11) + dnekclock() - ptdum(11)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine usr_particles_forces
+c
+c     calculate the rhs of particle equation
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real uvel(0:2), vvel(0:2), pmass,pmassf
+
+      common /PARTRK3/ kv_stage_p, kx_stage_p
+      real kv_stage_p(llpart,4,ldim), kx_stage_p(llpart,4,ldim)
+
+      ! begin timer
+      ptdum(12) = dnekclock()
+
+      pi  = 4.0d+0*atan(1.0d+0)
+
+      if (time_integ.eq.0) then ! BDF/EXT -----------------------------
+      do i=1,n
+         pmass = rpart(jvol,i)*rpart(jrhop,i)
+         call compute_re_particles(uvel,vvel,i,part_force(2))
+         do j=0,ndim-1
+            if (part_force(1).ne.0) call usr_particles_f_user(i,j)
+
+            rdum = 0.
+            if (part_force(1).ne.0) rdum = rdum + rpart(jfusr+j,i)
+
+            rpart(jf0+j,i) = rdum/pmass ! mass weighted force
+         enddo
+      enddo
+      elseif (time_integ.eq.1) then ! rk3 -----------------------------
+      if (part_force(3).ne.0.or.part_force(4).ne.0) then
+         call calc_substantial_derivative
+         call calc_drhodt
+      endif
+
+      do i=1,n
+         pmass = rpart(jvol,i)*rpart(jrhop,i)
+         pmassf= rpart(jvol,i)*rpart(jrho,i)
+         if (part_force(4).ne.0) pmass = pmass + 0.5*pmassf ! added mass
+         call compute_re_particles(uvel,vvel,i,part_force(2))
+            
+         do j=0,ndim-1
+           if (part_force(1).ne.0) call usr_particles_f_user(i,j)
+           if (part_force(2).ne.0) call usr_particles_f_qs_rk3(uvel(j),
+     >                                       vvel(j),j,i,part_force(2))
+           if (part_force(3).ne.0) call usr_particles_f_un_rk3(i,j)
+           if (part_force(4).ne.0) call usr_particles_f_iu_rk3(uvel(j),
+     >                                       vvel(j),i,j)
+
+           rdum = 0.
+           if (part_force(1).ne.0) rdum = rdum + rpart(jfusr+j,i)
+           if (part_force(2).ne.0) rdum = rdum + rpart(jfqs+j,i)
+           if (part_force(3).ne.0) rdum = rdum + rpart(jfun+j,i)
+           if (part_force(4).ne.0) rdum = rdum + rpart(jfiu+j,i)
+
+           rpart(jf0+j,i) = rdum/pmass ! mass weighted force
+        enddo
+
+c       if (istep.ge.2) then
+c       if (rpart(jx,i) .gt. -7.1 ) then
+c          write(6,*) 'hi',vvel(0),vvel(1),vvel(2),rpart(jfqs,i)
+c       endif
+c       endif
+      enddo
+
+      elseif (time_integ.eq.2) then ! PIEP ----------------------------
+
+      endif
+
+      ! end timer
+      pttime(12) = pttime(12) + dnekclock() - ptdum(12)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine compute_forces_post_part
+c
+c     post calculate forces due to factoring of equations
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real uvel(0:2), vvel(0:2), pmass, pmassf,S_qs
+
+      common /PARTRK3/ kv_stage_p, kx_stage_p
+      real kv_stage_p(llpart,4,ldim), kx_stage_p(llpart,4,ldim)
+
+      common /myparts/ times(0:3),alpha(0:3),beta(0:3)
+
+      ! begin timer
+      ptdum(13) = dnekclock()
+
+      pi  = 4.0d+0*atan(1.0d+0)
+
+      if (time_integ.eq.0) then ! BDF/EXT -----------------------------
+      do i=1,n
+         pmass = rpart(jvol,i)*rpart(jrhop,i)
+         S_qs = pmass/rpart(jtaup,i)
+         do j=0,ndim-1
+            rdum = 0.
+            if (part_force(1).ne.0) then
+               rpart(jfusr+j,i) = rpart(jfusr+j,i)
+c              rdum = rdum + rpart(jfusr+j,i) ! only hydrodyanmic force
+            endif
+            if (part_force(2).ne.0) then
+               rpart(jfqs+j,i) = S_qs*(rpart(ju0+j,i)-rpart(jv0+j,i))
+               rdum = rdum + rpart(jfqs+j,i)
+            endif
+            rpart(jf0+j,i) = rdum
+         enddo
+      enddo
+      elseif (time_integ.eq.1) then ! rk3 -----------------------------
+      do i=1,n
+         pmassf= rpart(jvol,i)*rpart(jrho,i)
+         do j=0,ndim-1
+            rdum = 0.
+            if (part_force(1).ne.0) then
+               rpart(jfusr+j,i) = rpart(jfusr+j,i)
+c              rdum = rdum + rpart(jfusr+j,i) ! only hydrodyanmic force
+            endif
+            if (part_force(2).ne.0) then
+               rpart(jfqs+j,i) = rpart(jfqs+j,i)
+               rdum = rdum + rpart(jfqs+j,i)
+            endif
+            if (part_force(3).ne.0) then
+               rpart(jfun+j,i) = rpart(jfun+j,i)
+               rdum = rdum + rpart(jfun+j,i)
+            endif
+            if (part_force(4).ne.0) then
+               rpart(jfiu+j,i) = rpart(jfiu+j,i) - 0.5*pmassf*
+     >             (beta(0)*rpart(jv0+j,i) -
+     >              beta(1)*rpart(jv1+j,i) -
+     >              beta(2)*rpart(jv2+j,i) -
+     >              beta(3)*rpart(jv3+j,i))
+               rdum = rdum + rpart(jfiu+j,i)
+            endif
+            rpart(jf0+j,i) = rdum
+         enddo
+      enddo
+      elseif (time_integ.eq.2) then ! PIEP ----------------------------
+
+      endif
+
+      ! end timer
+      pttime(13) = pttime(13) + dnekclock() - ptdum(13)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine compute_re_particles(uvel,vvel,i,qs_corr)
+c
+c     calculate the Reynolds number of particles (relative)
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'PERFECTGAS'
+      include 'CMTPART'
+
+      common /PARTRK3/ kv_stage_p, kx_stage_p
+      real   kv_stage_p(llpart,4,ldim), kx_stage_p(llpart,4,ldim)
+
+      real    uvel(0:2), vvel(0:2)
+      real    c0,T0,c_sound,mu_p,vel_diff,Re_p,M_p
+      integer qs_corr
+
+      ! begin timer
+      ptdum(14) = dnekclock()
+
+      uvel(0) = rpart(ju0,i)
+      uvel(1) = rpart(ju0+1,i)
+      uvel(2) = rpart(ju0+2,i)
+
+c     rk3 
+      if (stage.eq.1.and.time_integ.eq.1) then 
+         vvel(0) = rpart(jv0,i)
+         vvel(1) = rpart(jv0+1,i)
+         vvel(2) = rpart(jv0+2,i)
+      elseif(stage.eq.2.and.time_integ.eq.1) then
+         vvel(0) = rpart(jv0,i)  +0.5*dt*kv_stage_p(i,2,1)
+         vvel(1) = rpart(jv0+1,i)+0.5*dt*kv_stage_p(i,2,2)
+         vvel(2) = rpart(jv0+2,i)+0.5*dt*kv_stage_p(i,2,3)
+      elseif(stage.eq.3.and.time_integ.eq.1) then
+         vvel(0) = rpart(jv0,i)  -dt*kv_stage_p(i,2,1)
+     >                       +2.0*dt*kv_stage_p(i,3,1)
+         vvel(1) = rpart(jv0+1,i)-dt*kv_stage_p(i,2,2)
+     >                       +2.0*dt*kv_stage_p(i,3,2)
+         vvel(2) = rpart(jv0+2,i)-dt*kv_stage_p(i,2,3)
+     >                       +2.0*dt*kv_stage_p(i,3,3)
+      endif
+
+c     other bdf/PIEP
+      if (time_integ.ne.1) then
+         vvel(0) = rpart(jv0,i)
+         vvel(1) = rpart(jv0+1,i)
+         vvel(2) = rpart(jv0+2,i)
+      endif
+
+c     Sutherlands law for air (moderate), viscosity at particles location
+      c0   = 120.0       ! K
+      T0   = 291.15      ! K
+      mu_0 = 1.84113E-5  ! Pa s, inital fluid viscosity 
+
+c     sutherlands law (air)
+c     c_sound     = MixtPerf_C_GRT(gmaref,rgasref,rpart(jtemp,i))
+      c_sound = 1000000.
+      rpart(ja,i) = c_sound ! speed of sound at particle location
+c     mu_p = mu_0*(T0 + c0)/(rpart(jtemp,i) + c0)*(rpart(jtemp,i)/T0)**1.5
+c     if (qs_corr.eq.-1) mu_p = mu_0
+      mu_p = mu_0
+      vel_diff = sqrt((uvel(0)-vvel(0))**2+
+     >                (uvel(1)-vvel(1))**2+
+     >                (uvel(2)-vvel(2))**2)
+
+      Re_p = rpart(jrho,i)*rpart(jdp,i)*vel_diff/mu_p
+      M_p  = vel_diff/rpart(ja,i)
+c     write(6,*) rpart(jtemp,i),rpart(jrho,i)
+
+      rpart(jre,i) = Re_p
+
+      ! end timer
+      pttime(14) = pttime(14) + dnekclock() - ptdum(14)
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine calc_drhodt
+c     calculate density material time derivative at the grid points
+c     used for inviscid unsteady force
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      integer e
+      parameter (ldd=lxd*lyd*lzd)
+
+      real ur(lx1,ly1,lz1),us(lx1,ly1,lz1),ut(lx1,ly1,lz1),
+     >     urux(lx1,ly1,lz1),usvy(lx1,ly1,lz1),utwz(lx1,ly1,lz1),
+     >     dum(lx1,ly1,lz1)
+      real pcheat
+
+      ! begin timer
+      ptdum(15) = dnekclock()
+
+      pcheat = 0.0d+0
+      if (if3d) pcheat = 1.0d+0
+
+      do e=1,nelt
+c        call gradl_rst(ur,us,ut,vtrans(1,1,1,e,1),lx1,if3d)
+         call gradl_rst(ur,us,ut,phig(1,1,1,e),lx1,if3d)
+
+         call gradl_rst(urux,dum,dum,vx(1,1,1,e),lx1,if3d)
+         call gradl_rst(dum,usvy,dum,vy(1,1,1,e),lx1,if3d)
+         call gradl_rst(dum,dum,utwz,vz(1,1,1,e),lx1,if3d)
+      do k=1,lz1
+      do j=1,ly1
+      do i=1,lx1
+         lhs_density(i,j,k,e)= -1.0d+0/JACM1(i,j,k,e)
+     >         *(vx(i,j,k,e)*RXM1(i,j,k,e)*ur(i,j,k)
+     >         + vy(i,j,k,e)*SYM1(i,j,k,e)*us(i,j,k)
+     >         + pcheat*vz(i,j,k,e)*TZM1(i,j,k,e)*ut(i,j,k)
+     >         + vtrans(i,j,k,e,1)/phig(i,j,k,e)
+     >         * (urux(i,j,k)*RXM1(i,j,k,e)
+     >         + usvy(i,j,k)*SYM1(i,j,k,e)
+     >         + pcheat*utwz(i,j,k)*TZM1(i,j,k,e)))
+      enddo
+      enddo
+      enddo
+      enddo
+
+      ! end timer
+      pttime(15) = pttime(15) + dnekclock() - ptdum(15)
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine calc_substantial_derivative
+c 
+c     calculate rhs of NS, which is just pressure gradient. used for
+c     undisturbed and invisicid unsteady force
+c
+c     no forcing included...should it be?
+c
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      integer e
+      parameter (ldd=lxd*lyd*lzd)
+
+      real ur(lx1,ly1,lz1),us(lx1,ly1,lz1),ut(lx1,ly1,lz1),
+     >        urp(lx1,ly1,lz1), usp(lx1,ly1,lz1), utp(lx1,ly1,lz1)
+      real pcheat
+
+      ! begin timer
+      ptdum(16) = dnekclock()
+
+      pcheat = 0.0d+0
+      if (if3d) pcheat = 1.0d+0
+
+      do e=1,nelt
+         call gradl_rst(ur,us,ut,pr(1,1,1,e),lx1,if3d)
+         call gradl_rst(urp,usp,utp,phig(1,1,1,e),lx1,if3d)
+      do k=1,lz1
+      do j=1,ly1
+      do i=1,lx1
+         rhs_fluidp(i,j,k,1,e)= 1.0d+0/JACM1(i,j,k,e)
+     >         *(pr(i,j,k,e)/phig(i,j,k,e)*(RXM1(i,j,k,e)*urp(i,j,k)
+     >         + SXM1(i,j,k,e)*usp(i,j,k)
+     >         + pcheat*TXM1(i,j,k,e)*utp(i,j,k))
+     >         + RXM1(i,j,k,e)*ur(i,j,k)  + SXM1(i,j,k,e)*us(i,j,k)
+     >         + pcheat*TXM1(i,j,k,e)*ut(i,j,k))
+     >         / (-1.0*vtrans(i,j,k,e,1))                    
+c    >         / 1.0d+0
+         rhs_fluidp(i,j,k,2,e)= 1.0d+0/JACM1(i,j,k,e)
+     >         *(pr(i,j,k,e)/phig(i,j,k,e)*(RYM1(i,j,k,e)*urp(i,j,k)
+     >         + SYM1(i,j,k,e)*usp(i,j,k)
+     >         + pcheat*TYM1(i,j,k,e)*utp(i,j,k))
+     >         + RYM1(i,j,k,e)*ur(i,j,k)  + SYM1(i,j,k,e)*us(i,j,k)
+     >         + pcheat*TYM1(i,j,k,e)*ut(i,j,k))
+     >         / (-1.0*vtrans(i,j,k,e,1))                    
+c    >         / 1.0d+0
+         rhs_fluidp(i,j,k,3,e)= 1.0d+0/JACM1(i,j,k,e)
+     >         *(pr(i,j,k,e)/phig(i,j,k,e)*(RZM1(i,j,k,e)*urp(i,j,k)
+     >         + SZM1(i,j,k,e)*usp(i,j,k)
+     >         + pcheat*TZM1(i,j,k,e)*utp(i,j,k))
+     >         + RZM1(i,j,k,e)*ur(i,j,k)  + SZM1(i,j,k,e)*us(i,j,k)
+     >         + pcheat*TZM1(i,j,k,e)*ut(i,j,k))
+     >         / (-1.0*vtrans(i,j,k,e,1))                    
+c    >         / 1.0d+0
+      enddo
+      enddo
+      enddo
+      enddo
+
+      ! end timer
+      pttime(16) = pttime(16) + dnekclock() - ptdum(16)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine usr_particles_f_iu_rk3(uvel,vvel,ii,jj)
+c
+c     extra body forces
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      common /myparts/ times(0:3),alpha(0:3),beta(0:3)
+
+      real mach_no, fiu_corr,dvdt,uvel,vvel
+
+      ! begin timer
+      ptdum(17) = dnekclock()
+
+c     mach_no  = rpart(jv0+jj,ii)/rpart(ja,ii)            ! mach numb
+c     fiu_corr = 1.0 + 1.8*mach_no**2 + 7.6*mach_no**4    ! mach corr
+c     fiu_corr = fiu_corr*(1.+2.*rpart(jvol1,ii))         ! vol. f corr
+      fiu_corr = 1.0
+
+c     minus signs already in beta in some places
+c     dvdt     = beta(0)*rpart(jv0+jj,ii) -               ! dv/dt
+c    >           beta(1)*rpart(jv1+jj,ii) -
+c    >           beta(2)*rpart(jv2+jj,ii) -
+c    >           beta(3)*rpart(jv3+jj,ii)
+
+
+      rpart(jfiu+jj,ii) = 0.5*
+     >                    rpart(jvol,ii)*rpart(jrho,ii)* ! mf
+     >                    rpart(jDuDt+jj,ii)*            ! Du/Dt
+     >                    fiu_corr                       ! iu corr
+     >                  + 0.5*
+     >                    rpart(jvol,ii)*                ! part. vol
+     >                    fiu_corr*                      ! iu corr
+     >                    rpart(jdrhodt,ii)*             ! D/Dt rho_f
+     >                   (uvel-vvel)                     ! rel. velocity
+
+      ! end timer
+      pttime(17) = pttime(17) + dnekclock() - ptdum(17)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine usr_particles_f_un_rk3(ii,jj)
+c
+c     extra body forces
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      ! begin timer
+      ptdum(18) = dnekclock()
+
+      rpart(jfun+jj,ii) = rpart(jvol,ii)*rpart(jrho,ii)*  ! mf
+     >                    rpart(jDuDt+jj,ii)              ! Du/Dt
+
+      ! end timer
+      pttime(18) = pttime(18) + dnekclock() - ptdum(18)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine usr_particles_f_qs_rk3(u_stage_p,v_stage_p,fdim,i,
+     >                                                         qs_corr)
+c     calculate quasi steady force with drag corrections
+      include 'SIZE'
+      include 'TOTAL'
+      include 'PERFECTGAS'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real S_qs, u_stage_p,v_stage_p
+      real c_sound
+      real c0,T0
+     >     ,Re_p,mu_p,M_p,M_cr,vel_diff
+     >     ,cd, cd_cr, cd_m1, cd_m175,cd_std
+     >     ,csup(3),fsup(3),xi_sup
+     >     ,csub(3),fsub(3),xi_sub
+     >     ,rep,mag_sq
+      integer fdim,qs_corr
+
+      ! begin timer
+      ptdum(19) = dnekclock()
+
+c     csup(1) = 6.48
+c     csup(2) = 8.93
+c     csup(3) = 12.21
+
+c     csub(1) = 6.48 
+c     csub(2) = 9.28
+c     csub(3) = 12.21
+
+c     M_cr = 0.6         ! critical mach number for sphere
+
+c     Sutherlands law for air (moderate), viscosity at particles location
+c     c0   = 120.0       ! K
+c     T0   = 291.15      ! K
+c     mu_0 = 18.27E-3    ! Pa s, inital fluid viscosity (need to change!)
+
+c        sutherlands law (air)
+c        c_sound     = MixtPerf_C_GRT(gmaref,rgasref,rpart(jtemp,i))
+c        rpart(ja,i) = c_sound ! speed of sound at particle location
+c        mu_p = mu_0*(T0 + c0)/(rpart(jtemp,i) + c0)*
+c    >             (rpart(jtemp,i)/T0)**1.5
+c        if (qs_corr.eq.-1) mu_p = mu_0
+c        
+c        mag_sq = (u_stage_p   - v_stage_p)**2
+c        vel_diff = sqrt(mag_sq)
+
+c        Re_p = rpart(jrho,i)*rpart(jdp,i)*vel_diff/mu_p
+
+c        M_p  = vel_diff/rpart(ja,i)
+
+c           cd_cr   = (24.0/Re_p)*(1.0 + 0.15*Re_p**(0.684)) +
+c    >               0.513*(1.0 + 483.0*Re_p**(-0.669))**(-1)
+c           cd_std  = (24.0/Re_p)*(1.0 + 0.15*Re_p**0.687) +
+c    >               0.420*(1.0 + 42500.0*Re_p**(-1.16))**(-1)
+c           cd_m1   = (24.0/Re_p)*(1.0 + 0.118*Re_p**0.813) +
+c    >               0.690*(1.0 + 3550.0*Re_p**(-0.793))**(-1)
+c           cd_m175 = (24.0/Re_p)*(1.0 + 0.107*Re_p**0.867) +
+c    >               0.646*(1.0 + 861.0*Re_p**(-0.634))**(-1)
+
+c           fsup(1) = -2.963 + 4.392*M_p - 1.169*M_p*M_p
+c    >                -0.027*M_p*M_p*M_p - 0.233*exp((1.0-M_p)/0.011)
+c           fsup(2) = -6.617 + 12.11*M_p - 6.501*M_p*M_p
+c    >                +1.182*M_p*M_p*M_p - 0.174*exp((1.0-M_p)/0.010)
+c           fsup(3) = -5.866 + 11.57*M_p - 6.665*M_p*M_p
+c    >                +1.312*M_p*M_p*M_p - 0.350*exp((1.0-M_p)/0.012)
+
+c           fsub(1) = -1.884 + 8.422*M_p - 13.70*M_p*M_p
+c    >                +8.162*M_p*M_p*M_p 
+c           fsub(2) = -2.228 + 10.35*M_p - 16.96*M_p*M_p
+c    >                +9.840*M_p*M_p*M_p 
+c           fsub(3) = 4.362 - 16.91*M_p + 19.84*M_p*M_p
+c    >                -6.296*M_p*M_p*M_p 
+
+c        set appropriate drag coeffecient
+c        if (Re_p .le. 1E-16.or.qs_corr.eq.-1) then ! Re << 1
+c           print *, 'Re << 1'
+            cd = 0
+            S_qs = rpart(jvol,i)*rpart(jrhop,i)/rpart(jtaup,i)
+            S_qs = S_qs*(1. + .15*rpart(jre,i)**(.687))
+c        else                     ! Finite Re
+c           print *, 'Re finite'
+cc          cd = 24*(1+0.15*Re**(0.687)) ! should be divide by re
+cc          S_qs = rpart(jvol,i)*rpart(jrhop,i)*cd ! should be mult re
+cc   >             /(rpart(jtaup,i)*24.)
+c           if (M_p .le. M_cr) then
+c               print *, 'M < 0.6'
+c               cd = cd_std + (cd_cr - cd_std)*M_p/M_cr
+c           elseif ((M_p .gt. M_cr) .and. (M_p .le. 1)) then
+c               print *, '0.6 < M < 1'
+c               xi_sub = 0.0
+c               do j=1,3
+c                  rep = 1.0
+c               do k=1,3
+c               if (k.ne.j) then
+c                  rep = rep*(log10(Re_p) - csub(k))/(csub(j) - csub(k))
+c               endif
+c               enddo 
+c                  xi_sub = xi_sub + fsub(j)*rep
+c               enddo 
+c               cd = cd_cr + (cd_m1 - cd_cr)*xi_sub 
+c           else  
+c               print *, 'M > 1'
+c               xi_sup = 0.0
+c               do j=1,3
+c                  rep = 1.0
+c               do k=1,3
+c               if (k.ne.j) then
+c                  rep = rep*(log10(Re_p) - csup(k))/(csup(j) - csup(k))
+c               endif
+c               enddo 
+c                  xi_sup = xi_sup + fsup(j)*rep
+c               enddo 
+c               cd = cd_m1 + (cd_m175 - cd_m1)*xi_sup 
+c           endif
+c           S_qs =  rpart(jrhop,i)*rpart(jvol,i)*Re_p*cd/
+c    >              (24.0*rpart(jtaup,i)) !qs
+c        endif
+
+c     rpart(jre+fdim,i) = Re_p
+      rpart(jcd+fdim,i) = cd
+      rpart(jfqs+fdim,i) = S_qs*(u_stage_p   - v_stage_p)
+
+c     not rigerous, but check stability for rk3 (formula correct?)
+      s_qs = - S_qs
+      rchk = abs(1 + s_qs*dt + 0.5*(s_qs*dt)**2+0.1666666*(s_qs*dt)**3)
+      if (rchk .gt. 1.) then
+c        write(6,*) 'WARNING - Lower dt for particle rk3 stability: ',
+c    >              rchk, ' must be less than one. Or change particle
+c    >              properties (i.e., time scale, diameter, etc.)'
+c        call exitt
+      endif
+
+c     also, volume fraction correction
+c     rpart(jfqs+fdim,i) =rpart(jfqs+fdim,i)*(1.0 + 2.0*rpart(jvol1,i))
+c    >                   /(1.0 - rpart(jvol1,i))**3
+
+      ! end timer
+      pttime(19) = pttime(19) + dnekclock() - ptdum(19)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine usr_particles_f_user(ii,jj)
+c
+c     extra body forces
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real pmass
+
+      ! begin timer
+      ptdum(20) = dnekclock()
+
+      pmass = rpart(jvol,ii)*rpart(jrhop,ii)
+      if (jj.eq.0) rpart(jfusr+jj,ii) = 0.0 !-9.8*pmass
+      if (jj.eq.1) rpart(jfusr+jj,ii) = 0.0
+      if (jj.eq.2) rpart(jfusr+jj,ii) = 0.0
+
+      ! end timer
+      pttime(20) = pttime(20) + dnekclock() - ptdum(20)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine particles_solver_nearest_neighbor
+c
+c     this routine will let particles search for their nearest neighbors
+c     using the ghost particle approach.
+c
+c     bc_part = 0  => non-periodic search
+c     bc_part = 1  => periodic search
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+
+      common /nekmpi/ mid,mp,nekcomm,nekgroup,nekreal
+      common /myparth/ i_fp_hndl, i_cr_hndl
+
+      logical partl         ! dummy used in c_t_t()
+
+      ! begin timer
+      ptdum(21) = dnekclock()
+
+
+c     distance to check in x,y,z space
+      if (istep.eq.0.or.istep.eq.1) then
+         rper = param(76)
+         rle  = xerange(2,1,1) - xerange(1,1,1)
+         rtmp = df_dx/(2.*nx1)*sqrt(-log(rper/100.)/log(2.))*rle
+
+         d2chk(1) = rtmp
+         d2chk(2) = rtmp
+         d2chk(3) = rtmp
+      endif
+
+      if (istep.eq.0.or.istep.eq.1) then
+         ntmp = iglsum(nfptsgp,1)
+         if (nid.eq.0) write(6,*) 'Passed init ghost parts', rtmp/rle
+      endif
+
+c     create ghost particles
+      call create_ghost_particles
+
+      if (istep.eq.0.or.istep.eq.1) then
+         ntmp = iglsum(nfptsgp,1)
+         if (nid.eq.0) write(6,*) 'Passed create_ghost_particles',ntmp
+      endif
+
+c     send ghost particles
+      call crystal_tuple_transfer(i_cr_hndl,nfptsgp,llpart
+     $           , iptsgp,nigp,partl,0,rptsgp,nrgp,jgpps) ! jgpps is overwri
+
+      if (istep.eq.0.or.istep.eq.1) then
+         ntmp = iglsum(nfptsgp,1)
+         if (nid.eq.0) write(6,*) 'Passed send ghost particles',ntmp
+      endif
+
+c     search nearest neighbors from this proc particles and
+c     remote proc nearby particles (ghost particles)
+c     call search_nearest_neighbor
+
+      ! end timer
+      pttime(21) = pttime(21) + dnekclock() - ptdum(21)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine search_nearest_neighbor
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+c
+c     this routine implements a naive particle search. This should be
+c     updated for the future with some kind of more recent algorithm for
+c     nearest neighbor searching. Particles will need to search local
+c     particles (in rpart and ipart) and remote particles that are
+c     nearby but on different MPI ranks (rptsgp and iptsgp of length nfptsgp)
+c
+c     particles will check if they are within d2chk of each other
+c
+
+      integer nneigh
+
+      ! begin timer
+      ptdum(22) = dnekclock()
+
+      d3 = maxval(d2chk)
+
+c     let every particle search for itself
+      do i = 1,n
+         ipart(jai,i) = ipart(jpnn,i) ! for testing
+         nneigh = 0
+c        particles in local elements
+         do j = 1,n
+            if (i .ne. j) then
+               pdist = abs(rpart(jx,i)-rpart(jx,j))**2  
+     >                          + abs(rpart(jy,i)-rpart(jy,j))**2
+     >                          + abs(rpart(jz,i)-rpart(jz,j))**2
+               pdist = sqrt(pdist)
+               if (pdist .gt. d3) goto 1109
+               nneigh = nneigh + 1
+            endif
+1109        continue
+         enddo
+
+c        search list of ghost particles
+         do j = 1,nfptsgp
+            if (iptsgp(jgpes,j).eq. ipart(je0,i)) then ! exclude ghosts not
+                                                      ! meant for this eleme
+            pdist = abs(rpart(jx,i)-rptsgp(jgpx,j))**2  
+     >                    + abs(rpart(jy,i)-rptsgp(jgpy,j))**2
+     >                    + abs(rpart(jz,i)-rptsgp(jgpz,j))**2
+            pdist = sqrt(pdist)
+            if (pdist .gt. d3) goto 11092
+            nneigh = nneigh + 1
+            endif
+11092       continue
+         enddo
+         ipart(jpnn,i) = nneigh
+         ipart(jai,i) = ipart(jai,i) - ipart(jpnn,i) ! comptued distance
+                                                     ! for testing
+      enddo
+
+      ! end timer
+      pttime(22) = pttime(22) + dnekclock() - ptdum(22)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine create_ghost_particles
+c
+c     this routine will create ghost particles by checking if particle
+c     is within d2chk of element faces
+c
+c     ghost particle x,y,z list will be in rptsgp(jgpx,j),rptsgp(jgpy,j),
+c     rptsgp(jgpz,j), while processor and local element id are in
+c     iptsgp(jgppt,j) and iptsgp(jgpes,j)
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+
+      ! begin timer
+      ptdum(23) = dnekclock()
+
+      nfptsgp = 0
+      do i = 1,n
+         ie = ipart(je0,i) + 1
+c        vector coordinates of what faces a particle is next to
+         ii = 0
+         jj = 0
+         kk = 0
+         if (abs(rpart(jx,i) - xerange(1,1,ie)).lt.d2chk(1)) ii=-1
+         if (abs(rpart(jx,i) - xerange(2,1,ie)).lt.d2chk(1)) ii=1
+         if (abs(rpart(jy,i) - xerange(1,2,ie)).lt.d2chk(2)) jj=-1
+         if (abs(rpart(jy,i) - xerange(2,2,ie)).lt.d2chk(2)) jj=1
+         if (abs(rpart(jz,i) - xerange(1,3,ie)).lt.d2chk(3)) kk=-1
+         if (abs(rpart(jz,i) - xerange(2,3,ie)).lt.d2chk(3)) kk=1
+
+         itype = abs(ii)+abs(jj)+abs(kk) ! face (1), edge (2), or
+                                         ! corner (3) particle
+
+         if (itype.eq.1) then          ! face particle
+            call gp_create(ii,jj,kk,i,
+     >       nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+         elseif (itype.eq.2) then      ! edge particle
+            call gp_create(ii,jj,kk,i,
+     >       nedgegp,el_edge_num,el_edge_proc_map,el_edge_el_map)
+            if (abs(ii) + abs(jj) .eq. 2) then
+               call gp_create(0,jj,kk,i,
+     >          nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+               call gp_create(ii,0,kk,i,
+     >          nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+            elseif (abs(ii) + abs(kk) .eq. 2) then
+               call gp_create(0,jj,kk,i,
+     >          nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+               call gp_create(ii,jj,0,i,
+     >          nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+            elseif (abs(jj) + abs(kk) .eq. 2) then
+               call gp_create(ii,0,kk,i,
+     >          nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+               call gp_create(ii,jj,0,i,
+     >          nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+            endif
+         elseif (itype.eq.3) then       ! corner particle
+            call gp_create(ii,jj,kk,i,
+     >       ncornergp,el_corner_num,el_corner_proc_map,
+     >       el_corner_el_map)
+            call gp_create(0,jj,kk,i,
+     >       nedgegp,el_edge_num,el_edge_proc_map,el_edge_el_map)
+            call gp_create(ii,0,kk,i,
+     >       nedgegp,el_edge_num,el_edge_proc_map,el_edge_el_map)
+            call gp_create(ii,jj,0,i,
+     >       nedgegp,el_edge_num,el_edge_proc_map,el_edge_el_map)
+            call gp_create(ii,0,0,i,
+     >       nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+            call gp_create(0,jj,0,i,
+     >       nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+            call gp_create(0,0,kk,i,
+     >       nfacegp,el_face_num,el_face_proc_map,el_face_el_map)
+         endif
+      enddo
+
+      ! end timer
+      pttime(23) = pttime(23) + dnekclock() - ptdum(23)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine gp_create(ii,jj,kk,i,
+     >             nnl,el_tmp_num,el_tmp_proc_map,el_tmp_el_map)
+c
+c     this routine will create a ghost particle and append its position
+c     to rptsgp and its processor and element to iptsgp. nfptsgp will then
+c     be incremented. Note that ghost particles will not be created if 
+c     they are to be created on the same processor. In the near future, 
+c     this might not be true if periodic conditions are needed.
+c
+c     el_tmp_num holds vector coordinates of tmp=face,edge, or corners
+c     el_tmp_proc_map holds MPI rank of neighbor elements in el_tmp_num
+c                     order
+c     el_tmp_el_map holds local element number of neighbor elements
+c
+c     ii,jj,kk are vectors that tell what element a ghost particle
+c     should be sent to
+c
+c     i is which particle is creating the ghost particle from rpart,etc
+c
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+
+      integer el_tmp_proc_map(lelt,12)  ,el_tmp_el_map(lelt,12),
+     >        el_tmp_num(36)
+
+      ! begin timer
+      ptdum(24) = dnekclock()
+
+
+      xdlen = xdrange(2,1) - xdrange(1,1)
+      ydlen = xdrange(2,2) - xdrange(1,2)
+      zdlen = xdrange(2,3) - xdrange(1,3)
+
+      ic = 0
+      do j=1,3*nnl-2,3
+         ic = ic + 1
+         if (el_tmp_num(j)  .eq.ii) then
+         if (el_tmp_num(j+1).eq.jj) then
+         if (el_tmp_num(j+2).eq.kk) then
+            nfptsgp = nfptsgp + 1
+            ie = ipart(je0,i)+1
+            iitmp1 = 0
+            iitmp2 = 0
+            iitmp3 = 0
+            xloc = rpart(jx,i)
+            if (xloc+d2chk(1)*ii .gt. xdrange(2,1)) then
+                 xloc = rpart(jx,i) - xdlen
+                 iitmp1 = 1
+            endif
+            if (xloc+d2chk(1)*ii .lt. xdrange(1,1))then
+                 xloc = rpart(jx,i) + xdlen
+                 iitmp1 = 1
+            endif
+            yloc = rpart(jy,i)
+            if (yloc+d2chk(2)*jj .gt. xdrange(2,2))then
+                 yloc = rpart(jy,i) - ydlen
+                 iitmp2 = 1
+            endif
+            if (yloc+d2chk(2)*jj .lt. xdrange(1,2))then
+                 yloc = rpart(jy,i) + ydlen
+                 iitmp2 = 1
+            endif
+            zloc = rpart(jz,i)
+            if (zloc+d2chk(3)*kk .gt. xdrange(2,3))then
+                 zloc = rpart(jz,i) - zdlen
+                 iitmp3 = 1
+            endif
+            if (zloc+d2chk(3)*kk .lt. xdrange(1,3))then
+                 zloc = rpart(jz,i) + zdlen
+                 iitmp3 = 1
+            endif
+            rptsgp(jgpx,nfptsgp)    = xloc           ! x loc
+            rptsgp(jgpy,nfptsgp)    = yloc           ! y log
+            rptsgp(jgpz,nfptsgp)    = zloc           ! z log
+            rptsgp(jgpfh,nfptsgp)   = rpart(jf0,i)   ! hyd. force x
+            rptsgp(jgpfh+1,nfptsgp) = rpart(jf0+1,i) ! hyd. force y
+            rptsgp(jgpfh+2,nfptsgp) = rpart(jf0+2,i) ! hyd. force z
+            rptsgp(jgpvol,nfptsgp)  = rpart(jvol,i)  ! particle volum
+            rptsgp(jgpgam,nfptsgp)  = rpart(jgam,i)  ! spread correct
+            rptsgp(jgpspl,nfptsgp)  = rpart(jspl,i)  ! super particle
+            iptsgp(jgppid1,nfptsgp) = ipart(jpid1,i)          ! part id 1 tag
+            iptsgp(jgppid2,nfptsgp) = ipart(jpid2,i)          ! part id 2 tag
+            iptsgp(jgppid3,nfptsgp) = ipart(jpid3,i)          ! part id 3 tag
+            iptsgp(jgpps,nfptsgp)   = el_tmp_proc_map(ie,ic)  ! overwritten mpi
+            iptsgp(jgppt,nfptsgp)   = el_tmp_proc_map(ie,ic)  ! dest. mpi rank
+            iptsgp(jgpes,nfptsgp)   = el_tmp_el_map(ie,ic)    ! dest. elment
+            if (bc_part.eq.0) then        ! outflow bc
+            if (nid.eq.iptsgp(jgppt,nfptsgp)) then
+               nfptsgp = nfptsgp - 1
+            elseif (iitmp1+iitmp2+iitmp3.gt.0) then
+               nfptsgp = nfptsgp - 1
+            endif
+            endif
+
+            if (bc_part.eq.1) then        ! periodic bc
+            if (nid.eq.iptsgp(jgppt,nfptsgp)) then
+            if (iitmp1+iitmp2+iitmp3.eq.0) then
+               nfptsgp = nfptsgp - 1
+            endif
+            endif
+            endif
+         endif
+         endif
+         endif
+      enddo
+
+      ! end timer
+      pttime(24) = pttime(24) + dnekclock() - ptdum(24)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine compute_neighbor_el_proc
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+c
+c     This routine is called once at the beginning of the particle
+c     simulation. At the end of this routine, the common blocks
+c     /neighbor_proc/ & /neighbor_el_number/ are set. The idea behind
+c     this routine is to know what processor owns neighboring spectral
+c     elements and what local element number the neighboring element is.
+c
+c     el_*_proc_map holds: *(face,edge,corner) neighboring element 
+c                           MPI rank number
+c     el_*_el_map holds:   *(face,edge,corner) neighboring element
+c                           local numbers
+c
+c     The ordering of faces, edges, and corners are given in el_*_num
+c
+c     el_*_proc_map(i,j) and el_*_el_map(i,j) are ordered by elements 
+c     1 <= i <= nelt, and 1 <= j <= 26, where j=1,nfacegp are element
+c     faces, j=nfacegp+1,nfacegp+nedgegp are element edges, and 
+c     j = nfacegp+nedgegp+1,nfacegp+nedgegp+ncornergp are corners
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+      real   xdrange(2,3)
+      common /domainrange/ xdrange
+
+      common /nekmpi/ mid,mp,nekcomm,nekgroup,nekreal
+      common /myparth/ i_fp_hndl, i_cr_hndl
+
+      real  rimp(7,lelt*26)
+      integer iimp(3,lelt*26)
+
+      ! begin timer
+      ptdum(25) = dnekclock()
+
+c     face, edge, and corner number, x,y,z are all inline, so stride=3
+      el_face_num = (/ -1,0,0, 1,0,0, 0,-1,0, 0,1,0, 0,0,-1, 0,0,1 /)
+      el_edge_num = (/
+     >                 0,-1,-1, 1,0,-1, 0,1,-1, -1,0,-1,
+     >                 0,-1,1,  1,0,1,  0,1,1,  -1,0,1,
+     >                 -1,-1,0, 1,-1,0, 1,1,0,  -1,1,0
+     >              /)
+      el_corner_num = (/
+     >                 -1,-1,-1, 1,-1,-1, 1,1,-1, -1,1,-1,
+     >                 -1,-1,1,  1,-1,1,  1,1,1,  -1,1,1
+     >              /)
+      nfacegp   = 6  ! number of faces
+      nedgegp   = 12 ! number of edges
+      ncornergp = 8  ! number of corners
+      idum      = 0  ! dummy arguement
+
+      icount = 0 
+      do i=1,nelt
+         do j=1,3*nfacegp-2,3   ! faces
+            icount = icount + 1
+
+            xlen = xerange(2,1,i)-xerange(1,1,i)
+            ylen = xerange(2,2,i)-xerange(1,2,i)
+            zlen = xerange(2,3,i)-xerange(1,3,i)
+
+            xmid = (xerange(2,1,i)+xerange(1,1,i))/2.0
+            ymid = (xerange(2,2,i)+xerange(1,2,i))/2.0
+            zmid = (xerange(2,3,i)+xerange(1,3,i))/2.0
+
+            isignxx = el_face_num(j) 
+            isignyy = el_face_num(j+1) 
+            isignzz = el_face_num(j+2) 
+
+            xloc = xmid + (xlen+1.e-3)*isignxx/2.0
+            yloc = ymid + (ylen+1.e-3)*isignyy/2.0
+            zloc = zmid + (zlen+1.e-3)*isignzz/2.0
+            call bounds_p_check(xloc,xdrange(1,1),xdrange(2,1),idum)
+            call bounds_p_check(yloc,xdrange(1,2),xdrange(2,2),idum)
+            call bounds_p_check(zloc,xdrange(1,3),xdrange(2,3),idum)
+
+            rimp(1,icount) = xloc
+            rimp(2,icount) = yloc
+            rimp(3,icount) = zloc
+
+            iimp(1,icount) = nid
+            iimp(2,icount) = 0
+            iimp(3,icount) = i-1
+         enddo
+         do j=1,3*nedgegp-2,3    ! edges
+            icount = icount + 1
+
+            xlen = xerange(2,1,i)-xerange(1,1,i)
+            ylen = xerange(2,2,i)-xerange(1,2,i)
+            zlen = xerange(2,3,i)-xerange(1,3,i)
+
+            xmid = (xerange(2,1,i)+xerange(1,1,i))/2.0
+            ymid = (xerange(2,2,i)+xerange(1,2,i))/2.0
+            zmid = (xerange(2,3,i)+xerange(1,3,i))/2.0
+
+            isignxx = el_edge_num(j) 
+            isignyy = el_edge_num(j+1) 
+            isignzz = el_edge_num(j+2) 
+
+            xloc = xmid + (xlen+1.e-6)*isignxx/2.0
+            yloc = ymid + (ylen+1.e-6)*isignyy/2.0
+            zloc = zmid + (zlen+1.e-6)*isignzz/2.0
+            call bounds_p_check(xloc,xdrange(1,1),xdrange(2,1),idum)
+            call bounds_p_check(yloc,xdrange(1,2),xdrange(2,2),idum)
+            call bounds_p_check(zloc,xdrange(1,3),xdrange(2,3),idum)
+
+            rimp(1,icount) = xloc
+            rimp(2,icount) = yloc
+            rimp(3,icount) = zloc
+
+            iimp(1,icount) = nid
+            iimp(2,icount) = 0
+            iimp(3,icount) = i-1
+         enddo
+         do j=1,3*ncornergp-2,3   ! corners
+            icount = icount + 1
+
+            xlen = xerange(2,1,i)-xerange(1,1,i)
+            ylen = xerange(2,2,i)-xerange(1,2,i)
+            zlen = xerange(2,3,i)-xerange(1,3,i)
+
+            xmid = (xerange(2,1,i)+xerange(1,1,i))/2.0
+            ymid = (xerange(2,2,i)+xerange(1,2,i))/2.0
+            zmid = (xerange(2,3,i)+xerange(1,3,i))/2.0
+
+            isignxx = el_corner_num(j) 
+            isignyy = el_corner_num(j+1) 
+            isignzz = el_corner_num(j+2) 
+
+            xloc = xmid + (xlen+1.e-6)*isignxx/2.0
+            yloc = ymid + (ylen+1.e-6)*isignyy/2.0
+            zloc = zmid + (zlen+1.e-6)*isignzz/2.0
+            call bounds_p_check(xloc,xdrange(1,1),xdrange(2,1),idum)
+            call bounds_p_check(yloc,xdrange(1,2),xdrange(2,2),idum)
+            call bounds_p_check(zloc,xdrange(1,3),xdrange(2,3),idum)
+
+            rimp(1,icount) = xloc
+            rimp(2,icount) = yloc
+            rimp(3,icount) = zloc
+
+            iimp(1,icount) = nid
+            iimp(2,icount) = 0
+            iimp(3,icount) = i-1
+         enddo
+      enddo
+
+c     get processor and local element number of neighboring elemetns
+      call findpts(i_fp_hndl !  stride     !   call findpts( ihndl,
+     $           , iimp(2,1),3        !   $             rcode,1,
+     $           , iimp(1,1),3        !   &             proc,1,
+     $           , iimp(3,1),3        !   &             elid,1,
+     $           , rimp(5,1),7        !   &             rst,ndim,
+     $           , rimp(4,1),7        !   &             dist,1,
+     $           , rimp(1,1),7        !   &             pts(    1),1,
+     $           , rimp(2,1),7        !   &             pts(  n+1),1,
+     $           , rimp(3,1),7 ,icount)    !   &             pts(2*n+1),1,n)
+
+c     set common block values to be used later
+      do i = 1,nelt
+         nstride = (i-1)*(nfacegp+nedgegp+ncornergp)
+         do j = 1,nfacegp
+            ijloc = nstride + j
+            el_face_proc_map(i,j) = iimp(1,ijloc)
+            el_face_el_map(i,j) = iimp(3,ijloc)
+         enddo
+         nstride = nstride + nfacegp 
+         do j = 1,nedgegp
+            ijloc = nstride + j
+            el_edge_proc_map(i,j) = iimp(1,ijloc)
+            el_edge_el_map(i,j) = iimp(3,ijloc)
+         enddo
+         nstride = nstride + nedgegp 
+         do j = 1,ncornergp
+            ijloc = nstride + j
+            el_corner_proc_map(i,j) = iimp(1,ijloc)
+            el_corner_el_map(i,j) = iimp(3,ijloc)
+         enddo
+      enddo
+
+      ! end timer
+      pttime(25) = pttime(25) + dnekclock() - ptdum(25)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine bounds_p_check(xx,xl,xr,ifmove)
+      include 'SIZE'
+      include 'CMTPART'
+c     
+c     check if xx is between domain bounds of left (xl) and right (xr)
+c
+c     if it is outside of bounds, move periodically to other domain side
+c     and set ifmove to 1 so we know if xx has been changed
+c
+
+      ! begin timer
+      ptdum(26) = dnekclock()
+
+      ifmove = 0
+      if (xx .gt. xr) then
+         xx = abs(xx - xr) + xl
+         ifmove = 1
+      endif
+      if (xx .lt. xl) then
+         xx = xr - abs(xx - xl) 
+         ifmove = 1
+      endif
+
+      ! end timer
+      pttime(26) = pttime(26) + dnekclock() - ptdum(26)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine get_bdf_ext_coefs(beta,alpha,times)
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTPART'
+
+      real beta(0:3),alpha(0:3),times(0:3)
+      real c(0:8)
+
+      integer ilast,ncoef
+      save    ilast,ncoef
+      data    ilast,ncoef / -9 , 0 /
+
+      ! begin timer
+      ptdum(27) = dnekclock()
+
+      do i=3,1,-1
+         times(i)=times(i-1)
+      enddo
+      times(0) = time
+
+      call rzero(beta ,4)
+      call rzero(alpha,4)
+      if (istep.ne.ilast) then
+         ilast = istep
+         ncoef = ncoef + 1
+         ncoef = min(ncoef,3) ! Maximum 3rd order in time
+      endif
+      ncoefm1 = ncoef - 1
+
+      call fd_weights_full(times(0),times(1),ncoefm1,0,alpha(1))
+      call fd_weights_full(times(0),times(0),ncoef,1,c)
+      do j=0,ncoef
+         beta(j) = c(ncoef+1+j)
+      enddo
+      do j=1,ncoef
+         beta(j) = -beta(j)  ! Change sign, for convenience
+      enddo
+
+      ! end timer
+      pttime(27) = pttime(27) + dnekclock() - ptdum(27)
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine update_particle_location
+c     check if particles are outside domain
+c     > if bc_part = 1 then it is periodic
+c     > if bc_part = 0 then particles are killed (outflow)
+      include 'SIZE'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      real  xdrange(2,3) 
+      common /domainrange/ xdrange
+
+      integer in_part(llpart), icount_p,itmp(li,llpart)
+      real    rtmp(lr,llpart)
+
+      ! begin timer
+      ptdum(28) = dnekclock()
+
+      jx0 = jx
+
+      do i=1,n
+         in_part(i) = 0
+         do j=0,ndim-1
+            if (rpart(jx0+j,i).lt.xdrange(1,j+1))then
+               if (bc_part .eq. 1) then
+                  rpart(jx0+j,i) = xdrange(2,j+1) - 
+     &                             abs(xdrange(1,j+1) - rpart(jx0+j,i))
+                  rpart(jx1+j,i) = xdrange(2,j+1) +
+     &                             abs(xdrange(1,j+1) - rpart(jx1+j,i))
+                  rpart(jx2+j,i) = xdrange(2,j+1) +
+     &                             abs(xdrange(1,j+1) - rpart(jx2+j,i))
+                  rpart(jx3+j,i) = xdrange(2,j+1) +
+     &                             abs(xdrange(1,j+1) - rpart(jx3+j,i))
+               elseif (bc_part .eq. 0) then
+                  in_part(i) = -1
+                  goto 1511
+               endif
+            endif
+            if (rpart(jx0+j,i).gt.xdrange(2,j+1))then
+               if (bc_part .eq. 1) then
+                  rpart(jx0+j,i) = xdrange(1,j+1) +
+     &                             abs(rpart(jx0+j,i) - xdrange(2,j+1))
+                  rpart(jx1+j,i) = xdrange(1,j+1) -
+     &                             abs(rpart(jx1+j,i) - xdrange(2,j+1))
+                  rpart(jx2+j,i) = xdrange(1,j+1) -
+     &                             abs(rpart(jx2+j,i) - xdrange(2,j+1))
+                  rpart(jx3+j,i) = xdrange(1,j+1) -
+     &                             abs(rpart(jx3+j,i) - xdrange(2,j+1))
+               elseif (bc_part .eq. 0) then
+                  in_part(i) = -1
+                  goto 1511
+               endif
+            endif
+         enddo
+ 1511 continue
+      enddo
+
+      if (bc_part .eq. 0) then
+      ic = 0
+      do i=1,n
+         if (in_part(i).eq.0) then
+            ic = ic + 1 
+            call copy(rpart(1,ic),rpart(1,i),nr)
+            call icopy(ipart(1,ic),ipart(1,i),ni)
+         endif
+      enddo
+      n = ic
+      endif
+
+      ! end timer
+      pttime(28) = pttime(28) + dnekclock() - ptdum(28)
+
+      return
+      end
+c-----------------------------------------------------------------------
+c     interpolation routines
+c-----------------------------------------------------------------------
+      subroutine init_interpolation
+      include 'SIZE' 
+      include 'INPUT' 
+      include 'CMTPART' 
+c
+c     calculates the barycentric lagrange weights
+c
+
+      ! begin timer
+      ptdum(29) = dnekclock()
+
+c     get gll points in all directions
+      call zwgll(xgll,wxgll,lx1)
+      call zwgll(ygll,wygll,ly1)
+      call rone(zgll,lz1)
+      if(if3d) call zwgll(zgll,wzgll,lz1)
+c     set all weights to ones first
+      call rone(wxgll,lx1)
+      call rone(wygll,ly1)
+      call rone(wzgll,lz1)
+c
+c     copy for reduced interpolation
+      nx1r = lx1
+      if (red_interp.gt.0) then
+         nx1r = red_interp
+         ic = 0
+         do j=1,lx1,2
+            ic = ic + 1
+            xgll(ic) = xgll(j)
+            ygll(ic) = ygll(j)
+            zgll(ic) = zgll(j)
+         enddo
+      endif
+
+c     calc x bary weights
+      do j=1,nx1r
+         do k=1,nx1r
+            if (j .NE. k) then
+               wxgll(j) = wxgll(j)/(xgll(j) - xgll(k))
+            endif
+         enddo
+      enddo
+c     calc y bary weights
+      do j=1,nx1r
+         do k=1,nx1r
+            if (j .NE. k) then
+               wygll(j) = wygll(j)/(ygll(j) - ygll(k))
+            endif
+         enddo
+      enddo
+c     calc z bary weights
+      do j=1,nx1r
+         do k=1,nx1r
+            if (j .NE. k) then
+               wzgll(j) = wzgll(j)/(zgll(j) - zgll(k))
+            endif
+         enddo
+      enddo
+
+      ! end timer
+      pttime(29) = pttime(29) + dnekclock() - ptdum(29)
+
+      return 
+      end
+c-----------------------------------------------------------------------
+      subroutine init_baryinterp(x,y,z,nxyz)
+c     used for 3d interpolation only
+      include 'SIZE'
+      include 'CMTPART'
+      common /BARRYREP/ rep, bot
+      real              rep(lx1,ly1,lz1), bot
+
+      real x, y, z, repy, repz,repx,diff
+      real bwgtx(lx1),bwgty(ly1),bwgtz(lz1)
+
+      ! begin timer
+      ptdum(30) = dnekclock()
+
+      bot= 0.00
+      do k=1,nx1r
+         diff = z - zgll(k)
+           if (abs(diff) .le. 1E-16) diff = sign(1E-16,diff)
+         bwgtz(k) = wzgll(k)/diff
+      enddo
+      do i=1,nx1r
+         diff = x - xgll(i)
+           if (abs(diff) .le. 1E-16) diff = sign(1E-16,diff)
+         bwgtx(i) = wxgll(i)/diff
+      enddo 
+      do j=1,nx1r
+         diff = y-ygll(j)
+           if (abs(diff) .le. 1E-16) diff = sign(1E-16,diff)
+         bwgty(j) = wygll(j)/diff
+      enddo
+
+      do k=1,nx1r
+      do j=1,nx1r
+         repdum = bwgty(j)*bwgtz(k)
+      do i=1,nx1r
+         rep(i,j,k) =  repdum* bwgtx(i)
+         bot        =  bot + rep(i,j,k)
+      enddo
+      enddo
+      enddo 
+
+      do k=1,nx1r
+      do j=1,nx1r
+      do i=1,nx1r
+         rep(i,j,k) =  rep(i,j,k)/bot
+      enddo
+      enddo
+      enddo
+
+      ! end timer
+      pttime(30) = pttime(30) + dnekclock() - ptdum(30)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine baryinterp(field,pofx,nxyz)
+c     used for 3d interpolation only
+      include 'SIZE'
+      include 'CMTPART'
+      common /BARRYREP/ rep, bot
+      real              rep(lx1,ly1,lz1), bot
+      real field(1),pofx,top
+
+      ! begin timer
+      ptdum(31) = dnekclock()
+
+      pofx = 0.00
+      if (nx1r.eq.lx1) then ! full interpolation
+      do i=1,nxyz
+         pofx =  pofx + rep(i,1,1)*field(i)
+      enddo
+      else                  ! reduced interpolation
+
+      kk = 0 
+      do k=1,nx1,2
+         kk = kk + 1
+         jj = 0
+         ijk3 = (k-1)*nx1**2
+      do j=1,nx1,2
+         jj = jj + 1
+         ii = 0
+         ijk2 = ijk3+(j-1)*nx1
+      do i=1,nx1,2
+         ii   = ii + 1
+         ijk1 = ijk2 + i
+         pofx =  pofx + rep(ii,jj,kk)*field(ijk1)
+      enddo
+      enddo
+      enddo
+      endif
+
+      ! end timer
+      pttime(31) = pttime(31) + dnekclock() - ptdum(31)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine triinterp(xf,yf,zf,field,x,y,z,r,s,t,ie,pval)
+c     
+c     used for 3d trilinear interpolation
+c
+      include 'SIZE'
+      include 'CMTPART'
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+
+      real field(nx1,ny1,nz1),xf(nx1,ny1,nz1),yf(nx1,ny1,nz1),
+     >                        zf(nx1,ny1,nz1)
+      real x,y,z,pval,c00,c01,c10,c11,c0,c1_0,c1_1,r,s,t
+
+      ! begin timer
+      ptdum(32) = dnekclock()
+
+      rdelta = 2./(nx1-1.)
+      sdelta = 2./(ny1-1.)
+      tdelta = 2./(nz1-1.)
+
+      mxx = floor((1.+r)/rdelta)+1
+      myy = floor((1.+s)/sdelta)+1
+      mzz = floor((1.+t)/tdelta)+1
+
+      xd = (x - xf(mxx,myy,mzz))/(xf(mxx+1,myy,mzz)-xf(mxx,myy,mzz))
+      yd = (y - yf(mxx,myy,mzz))/(yf(mxx,myy+1,mzz)-yf(mxx,myy,mzz))
+      zd = (z - zf(mxx,myy,mzz))/(zf(mxx,myy,mzz+1)-zf(mxx,myy,mzz))
+
+      c00=field(mxx,myy,mzz)*(1.-xd)+field(mxx+1,myy,mzz)*xd
+      c01=field(mxx,myy,mzz+1)*(1.-xd)+field(mxx+1,myy,mzz+1)*xd
+      c10=field(mxx,myy+1,mzz)*(1.-xd)+field(mxx+1,myy+1,mzz)*xd
+      c11=field(mxx,myy+1,mzz+1)*(1.-xd)+field(mxx+1,myy+1,mzz+1)*xd
+
+      c1_0 = c00*(1.-yd) + c10*yd
+      c1_1 = c01*(1.-yd) + c11*yd
+
+      pval = c1_0*(1.-zd) + c1_1*zd
+
+      ! end timer
+      pttime(32) = pttime(32) + dnekclock() - ptdum(32)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine interp_props_part_location
+      include 'SIZE'
+      include 'INPUT'
+      include 'SOLN'
+      include 'CMTDATA'
+      include 'CMTPART'
+      include 'GEOM'
+      common /BARRYREP/ rep, bot
+      real              rep(lx1,ly1,lz1), bot
+
+c     common /point2gridc/ p2gc,p2gforce,spl
+c     real   p2gc(lx1,ly1,lz1,lelt,4),p2gforce(lelt),spl
+
+      ! begin timer
+      ptdum(33) = dnekclock()
+
+      nxyz = nx1*ny1*nz1
+        do i=1,n
+           rrdum = 1.0
+           if(if3d) rrdum = rpart(jr+2,i)
+c          init. barycentric interp for this particle (cost savings)
+           call init_baryinterp(rpart(jr,i),rpart(jr+1,i),rrdum,nxyz)
+
+c          interpolate fields for this particle
+           ie  =  ipart(je0,i) + 1
+           call baryinterp(vx(1,1,1,ie),rpart(ju0,i),nxyz)   !fluid uvel
+           call baryinterp(vy(1,1,1,ie),rpart(ju0+1,i),nxyz) !fluid vvel
+           if (if3d) call baryinterp(vz(1,1,1,ie),           !fluid wvel
+     >                                  rpart(ju0+2,i),nxyz)
+
+           call baryinterp(t(1,1,1,ie,1),rpart(jtemp,i),nxyz)!fluid temp
+           call baryinterp(vtrans(1,1,1,ie,1),rpart(jrho,i), !fluid dens
+     >                                                  nxyz) 
+
+           call baryinterp(ptw(1,1,1,ie,4),rpart(jvol1,i),   !change!!
+     >                                                  nxyz) 
+c             call triinterp(xm1(1,1,1,ie),ym1(1,1,1,ie),
+c    >                       zm1(1,1,1,ie),ptw(1,1,1,ie,4),
+c    >                       rpart(jx,i),rpart(jy,i),rpart(jz,i),
+c    >                       rpart(jr,i),rpart(jr+1,i),rpart(jr+2,i),
+c    >                       ie,rpart(jvol1,i))
+
+           if (part_force(4).ne.0.or.part_force(3).ne.0) then
+           call baryinterp(rhs_fluidp(1,1,1,1,ie),           !Du/Dt
+     >                                  rpart(jDuDt,i),nxyz)
+           call baryinterp(rhs_fluidp(1,1,1,2,ie),           !Dv/Dt
+     >                                rpart(jDuDt+1,i),nxyz)
+           call baryinterp(rhs_fluidp(1,1,1,3,ie),           !Dw/Dt
+     >                                  rpart(jDuDt+2,i),nxyz)
+           call baryinterp(lhs_density(1,1,1,ie),            !drho/dt
+     >                                  rpart(jdrhodt,i),nxyz)
+           endif
+
+c          if (two_way.ne.0) ! corrections for integration
+c    >        call triinterp(p2gc(1,1,1,ie,1),p2gc(1,1,1,ie,2),
+c    >                       p2gc(1,1,1,ie,3),p2gc(1,1,1,ie,4),
+c    >                       rpart(jx,i),rpart(jy,i),rpart(jz,i),
+c    >                       rpart(jr,i),rpart(jr+1,i),rpart(jr+2,i),
+c    >                       ie,rpart(jgam,i))
+        enddo
+
+      ! end timer
+      pttime(33) = pttime(33) + dnekclock() - ptdum(33)
+
+      return
+      end
+c----------------------------------------------------------------------
+c     particle input/output/ restart routines
+c----------------------------------------------------------------------
+      subroutine usr_particles_io(nistep) ! nistep not used, remove
+      include 'SIZE'
+      include 'SOLN'
+      include 'INPUT'
+      include 'MASS'
+      include 'TSTEP'
+      include 'CMTDATA'
+      include 'CMTPART'
+      include 'mpif.h'
+
+      common /nekmpi/ mid,np,nekcomm,nekgroup,nekreal
+
+      integer icalld
+      save    icalld
+      data    icalld  /-1/
+
+      character*15 locstring, velstring, datastring
+      integer oldfile, wdata_type, newfile
+      integer*8 disp, stride_len 
+      integer status_mpi(MPI_STATUS_SIZE)
+      integer prevs(0:np-1),npt_total,e
+      real realtmp(4,llpart), vmag, rfpfluid(3),rfpfluidl(3),
+     >     dum_fld(lx1,ly1,lz1,lelt),msum,msum_tot(3,2)
+
+      ! begin timer
+      ptdum(34) = dnekclock()
+
+      if (.true.) then ! skip/no skip particle mpi io
+
+c     setup files to write to mpi -------------------------------------
+      icalld = icalld+1
+      write(locstring,'(A7,I5.5,A3)') 'partxyz', icalld, '.3D' 
+      write(datastring,'(A8,I5.5)') 'partdata', icalld
+
+      do i = 1,n
+         realtmp(1,i) = rpart(jx,i)
+         realtmp(2,i) = rpart(jy,i)
+         realtmp(3,i) = rpart(jz,i)
+
+         vmag = rpart(jv0,i)**2 + rpart(jv0+1,i)**2
+         if (if3d) vmag = vmag + rpart(jv0+2,i)**2
+         vmag = sqrt(vmag)
+
+         realtmp(4,i) = real(ipart(jai,i))
+      enddo
+
+      call MPI_Send(n, 1, MPI_INTEGER, 0, 0, nekcomm, ierr)
+      npt_total = iglsum(n,1)
+
+c     write particle data to read into script
+      if (nid.eq. 0) then
+c         output data so files can be easily converted to binary
+          open(364, file=datastring, action="write")
+          write(364,*) npt_total
+          close(364)
+          prevs(0) = n
+          do i=1,np-1
+             call MPI_Recv(prevs(i),1,MPI_INTEGER,i,
+     >                     0,nekcomm,status_mpi,ierr)
+          enddo
+      endif
+      call MPI_BCAST(prevs,np, MPI_INTEGER,0,nekcomm,ierr) 
+
+      stride_len = 0.0
+      if (nid .ne. 0) then
+      do i=1,nid
+         stride_len = stride_len + prevs(i-1)
+      enddo
+      endif
+
+
+c     print out particle values -----------------------------------
+      call MPI_FILE_OPEN(nekcomm, locstring,
+     >                   MPI_MODE_CREATE + MPI_MODE_WRONLY, 
+     >                   MPI_INFO_NULL, oldfile, ierr) 
+
+      disp = stride_len*4*8
+      call MPI_FILE_SET_VIEW(oldfile, disp, MPI_DOUBLE_PRECISION,
+     >                       MPI_DOUBLE_PRECISION, "native", 
+     >                       MPI_INFO_NULL, ierr) 
+      call MPI_FILE_WRITE(oldfile, realtmp(1,1), n*4,
+     >                  MPI_DOUBLE_PRECISION,
+     >                  MPI_STATUS_IGNORE, ierr) 
+      call MPI_FILE_CLOSE(oldfile, ierr) 
+
+c     output grid data for particles two-way coupled ------------------
+c        note in visit, xvel = fhydx, yvel = fhydy,
+c        zvel = fhydz, pressure = phi_p 
+      itmp = 1
+      call rzero(dum_fld,lx1*ly1*lz1*lelt)
+      call outpost2(ptw(1,1,1,1,1),         ! fhyd_x
+     >              ptw(1,1,1,1,2),         ! fhyd_y
+     >              ptw(1,1,1,1,3),         ! fhyd_z
+     >              ptw(1,1,1,1,4),         ! phi_p
+     >              dum_fld       ,         ! dummy
+     >              itmp          ,        
+     >              'ptw')
+
+c     eulerian integrations -----------------------------------------
+c     fluid momentum cmtnek
+c     do ieq=2,4 
+c        msum = 0.0
+c        do e=1,nelt
+c        do k=1,nz1
+c        do j=1,ny1
+c        do i=1,nx1
+c           msum = msum + (u(i,j,k,ieq,e)*bm1(i,j,k,e))
+c        enddo
+c        enddo
+c        enddo
+c        enddo
+c        msum_tot(ieq-1,1) = glsum(msum,1)
+c     enddo 
+c     fluid momentum nek5000
+      msum_tot(1,1) = glsc3(bm1,vtrans,vx,nx1*ny1*nz1*nelv)
+      msum_tot(2,1) = glsc3(bm1,vtrans,vy,nx1*ny1*nz1*nelv)
+      msum_tot(3,1) = glsc3(bm1,vtrans,vz,nx1*ny1*nz1*nelv)
+c     particle volume fraction
+      vf_part_e     = glsc2(bm1,ptw(1,1,1,1,4),nx1*ny1*nz1*nelt)
+c     particle forces on fluid
+      rfpfluid(1)   = glsc2(bm1,ptw(1,1,1,1,1),nx1*ny1*nz1*nelt)
+      rfpfluid(2)   = glsc2(bm1,ptw(1,1,1,1,2),nx1*ny1*nz1*nelt)
+      rfpfluid(3)   = glsc2(bm1,ptw(1,1,1,1,3),nx1*ny1*nz1*nelt)
+
+c     lagrangian integrations ---------------------------------------
+c     particle momentum
+      do ieq=0,2
+         msum = 0.0
+         rsum = 0.0
+         do i=1,n
+            msum = msum + rpart(jv0+ieq,i)*rpart(jrhop,i)*rpart(jvol,i)
+            rsum = rsum + rpart(jf0+ieq,i)
+         enddo
+         msum_tot(ieq+1,2) = glsum(msum,1)
+         rfpfluidl(1+ieq)  = glsum(rsum,1)
+      enddo
+c     particle volume fraction
+      msum = 0.0
+      do i=1,n
+         msum = msum + rpart(jvol,i)
+      enddo
+      vf_part_l = glsum(msum,1)
+
+c     print to files ------------------------------------------------
+c     print properties to logfile
+      if (nid.eq.0) write(6,500) "--- Eulerian Properties ------"
+      if (nid.eq.0) write(6,500) "Fluid Momentum :              ", 
+     >                  msum_tot(1,1),msum_tot(2,1),msum_tot(3,1)
+      if (nid.eq.0) write(6,500) "Particle forces:              ", 
+     >                  rfpfluid(1),rfpfluid(2),rfpfluid(3)         
+      if (nid.eq.0) write(6,500) "Particle Volume:              ", 
+     >                  vf_part_e
+      if (nid.eq.0) write(6,500) "--- Lagrangian Properties --- "
+      if (nid.eq.0) write(6,500) "Particle Momentum :           ", 
+     >                  msum_tot(1,2),msum_tot(2,2),msum_tot(3,2)
+      if (nid.eq.0) write(6,500) "Particle forces:              ", 
+     >                  rfpfluidl(1),rfpfluidl(2),rfpfluidl(3)         
+      if (nid.eq.0) write(6,500) "Particle Volume:              ", 
+     >                  vf_part_l
+      if (nid.eq.0) then 
+         open(1511, file="MOM", action="write",position="append")
+                    write(1511,"(9ES20.10)") 1.*istep,
+     >                          msum_tot(1,1),msum_tot(1,2),
+     >                          msum_tot(2,1),msum_tot(2,2),
+     >                          msum_tot(3,1),msum_tot(3,2),
+     >                          vf_part_e    ,vf_part_l
+         close(1511)
+      endif
+
+c     print values for one particle ----------------------------------
+      do i =1,n
+         if (ipart(jpid1,i) .eq. 0) then   ! started on proc 0
+         if (ipart(jpid2,i) .eq. 1) then   ! id 1 at time 0
+         if (ipart(jpid3,i) .eq. 0) then   ! time 0
+            open(1511, file="PID", action="write",position="append")
+            write(6,600) 'PID: ', 1.*istep !2
+     >          ,rpart(jx,i)    !3
+     >          ,rpart(jy,i)    !4
+     >          ,rpart(jz,i)    !5
+     >          ,rpart(jv0,i)   !6
+     >          ,rpart(jv0+1,i) !7
+     >          ,rpart(jv0+2,i) !8
+     >          ,real(ipart(jpnn,i))!9
+            write(1511,"(20ES20.10)") 1.*istep !1
+     >          ,rpart(jx,i)    !2
+     >          ,rpart(jy,i)    !3
+     >          ,rpart(jz,i)    !4
+     >          ,rpart(jv0,i)   !5
+     >          ,rpart(jv0+1,i) !6
+     >          ,rpart(jv0+2,i) !7
+     >          ,rpart(jfusr,i) !8
+     >          ,rpart(jfusr+1,i) !9
+     >          ,rpart(jfusr+2,i) !10
+     >          ,rpart(jfqs,i) !11
+     >          ,rpart(jfqs+1,i) !12
+     >          ,rpart(jfqs+2,i) !13
+     >          ,rpart(jfun,i) !14
+     >          ,rpart(jfun+1,i) !15
+     >          ,rpart(jfun+2,i) !16
+     >          ,rpart(jfiu,i) !17
+     >          ,rpart(jfiu+1,i) !18
+     >          ,rpart(jfiu+2,i) !19
+c    >          ,real(ipart(jpnn,i))!9
+            close(1511)
+         endif
+         endif
+         endif
+      enddo      
+
+  500 FORMAT(A30,9ES20.10)
+  600 FORMAT(A9,8ES20.10)
+
+      ! end timer
+      pttime(34) = pttime(34) + dnekclock() - ptdum(34)
+
+      endif ! end skip/no skip particle mpi io
+
+c     output timings
+      call output_particle_timers 
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine output_particle_timers
+      include 'SIZE'
+      include 'CMTTIMERS'
+      include 'TSTEP'
+      include 'PARALLEL'
+      include 'CMTPART'
+
+      if(mod(istep,iostep).eq.0.or. istep.eq.1) then
+c        first compute totals
+         rdum  = ftime/istep
+         dtime = glsum(rdum,1)
+         rtime_total = dtime/np ! both pinit and psolve in here
+
+         rdum  = pttime(1)/istep
+         dtime = glsum(rdum,1)
+         rtime_pinit = dtime/np
+
+         rdum  = pttime(5)/istep
+         dtime = glsum(rdum,1)
+         rtime_psolve = dtime/np
+
+         rtime_fsolve = rtime_total - rtime_psolve - rtime_pinit
+         rtime_fpsolve = rtime_fsolve + rtime_psolve
+
+         if(nio.eq.0) 
+     >      write(6,*) istep,rtime_fpsolve,
+     >                 'total time                       '
+         if(nio.eq.0) 
+     >      write(6,*) istep,rtime_fsolve,
+     >                 'total fluid time                 '
+         if(nio.eq.0) 
+     >      write(6,*) istep,rtime_psolve,
+     >                 'total particle time              '
+
+c        now compute detailed particle times - next level
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime_pinit, 
+     >              'usr_particles_init               '!1
+
+         rdum  = pttime(28)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'update_particle_location         '!28
+
+         rdum  = pttime(35)/istep 
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'move_particles_inproc            '!35
+
+         rdum  = pttime(33)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'interp_props_part_location       '!33
+
+         rdum  = pttime(12)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'usr_particles_forces             '!12
+
+         rdum  = pttime(10)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'update_vel_and_pos_bdf           '!10
+
+         rdum  = pttime(11)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'update_vel_and_pos_rk3           '!11
+
+         rdum  = pttime(13)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'compute_forces_post_part         '!13
+
+         rdum  = pttime(21)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'particles_solver_nearest_neighbor'!21
+
+         rdum  = pttime(6)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'spread_props_grid                '!6
+
+c        now compute detailed particle times - all other routines
+         rdum  = pttime(2)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'set_bounds_box                   '!2
+
+         rdum  = pttime(3)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'place_particles                  '!3
+
+         rdum  = pttime(4)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'set_part_pointers                '!4
+
+         rdum  = pttime(5)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'usr_particles_solver             '!5
+
+         rdum  = pttime(7)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'local_part_to_grid               '!7
+
+         rdum  = pttime(8)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'remote_part_to_grid              '!8
+
+         rdum  = pttime(9)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'point_to_grid                    '!9
+
+         rdum  = pttime(14)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'compute_re_particles             '!14
+
+         rdum  = pttime(15)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'calc_drhodt                      '!15
+
+         rdum  = pttime(16)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'calc_substantial_derivative      '!16
+
+         rdum  = pttime(17)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'usr_particles_f_iu_rk3           '!17
+
+         rdum  = pttime(18)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'usr_particles_f_un_rk3           '!18
+
+         rdum  = pttime(19)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'usr_particles_f_qs_rk3           '!19
+
+         rdum  = pttime(20)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'usr_particles_f_user             '!20
+
+         rdum  = pttime(22)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'search_nearest_neighbor          '!22
+
+         rdum  = pttime(23)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'create_ghost_particles           '!23
+
+         rdum  = pttime(24)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'gp_create                        '!24
+
+         rdum  = pttime(25)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'compute_neighbor_el_proc         '!25
+
+         rdum  = pttime(26)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'bounds_p_check                   '!26
+
+         rdum  = pttime(27)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'get_bdf_ext_coefs                '!27
+
+         rdum  = pttime(29)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'init_interpolation               '!29
+
+         rdum  = pttime(30)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'init_baryinterp                  '!30
+
+         rdum  = pttime(31)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'baryinterp                       '!31
+
+         rdum  = pttime(32)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'triinterp                        '!32
+
+         rdum  = pttime(34)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'usr_particles_io                 '!34
+
+         rdum  = pttime(36)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'particles_in_nid                 '!36
+
+         rdum  = pttime(37)/istep
+         dtime = glsum(rdum,1)
+         rtime = dtime/np
+         if(nio.eq.0)
+     >   write(6,*) istep,rtime, 
+     >              'update_findpts_info              '!37
+
+      endif
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine output_particle_options
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CMTDATA'
+      include 'CMTPART'
+
+      npt_total = iglsum(n,1) ! recompute for sanity check
+
+c     print particle options -------------------------------------------
+      if (nid.eq. 0) then
+c     headers here
+      write(6,100)
+     >'/-------------------------------------------------------------//'
+      write(6,100)
+     >'/                       Particle Options                      //'
+      write(6,100)
+     >'/-------------------------------------------------------------//'
+
+c     start printing options
+      write(6,200) 
+     >     'Number of particles                               : ',
+     >     npt_total 
+      write(6,200) 
+     >     'Solver (0=bdf/ext tracer,1=rk3,2=bdf)             : ',
+     >     time_integ
+      write(6,300)
+     >     'Reduced interpolation                             : ',
+     >     red_interp , '/',lx1
+      write(6,200)
+     >     'Particle boundary condition (0=outflow,1=periodic): ',
+     >     bc_part 
+      write(6,200)
+     >     'Delay particles until timestep                    : ',
+     >     time_delay 
+      write(6,200)
+     >     'Two-way coupled (0=no,1=yes)                      : ',
+     >     two_way
+      write(6,400)
+     >     'Forces (0=no,1=yes,-1=on w/o corr;usr,qs,un,iu)   : ',
+     >     part_force(1),',',part_force(2),',',part_force(3),',',
+     >     part_force(4)
+      write(6,500)
+     >     'Particle density [kg/m^3]                         : ',
+     >     rho_p
+      write(6,500)
+     >     'Particle diameter [m]                             : ',
+     >     dp
+      write(6,500)
+     >     'Fluid viscosity for drag [Pa s]                   : ',
+     >     mu_0 
+      write(6,500)
+     >     'Average particle volume fraction                  : ',
+     >     phi_desire
+
+c     footers here
+      write(6,100)
+     >'//-------------------------------------------------------------/'
+      write(6,100)
+     >'/                     End Particle Options                    //'
+      write(6,100)
+     >'//-------------------------------------------------------------/'
+      endif
+
+  100 FORMAT(A65) 
+  200 FORMAT(A52,I13) 
+  300 FORMAT(A52,I10,A1,I2) 
+  400 FORMAT(A52,I4,A1,I2,A1,I2,A1,I2) 
+  500 FORMAT(A52,ES13.4)
+
+      return
+      end
+c----------------------------------------------------------------------
+c     effeciently move particles between processors routines
+c----------------------------------------------------------------------
+      subroutine move_particles_inproc
+c     Interpolate fluid velocity at current xyz points and move
+c     data to the processor that owns the points.
+c     Input:    n = number of points on this processor
+c     Output:   n = number of points on this processor after the move
+c     Code checks for n > llpart and will not move data if there
+c     is insufficient room.
+      include 'SIZE'
+      include 'TOTAL'
+      include 'CTIMER'
+      include 'CMTPART'
+
+      common /nekmpi/ mid,mp,nekcomm,nekgroup,nekreal
+      common /myparth/ i_fp_hndl, i_cr_hndl
+
+      common /elementload/ gfirst, inoassignd, resetFindpts, pload(lelg)
+      integer gfirst, inoassignd, resetFindpts, pload
+
+c     integer nw
+c     common /particlenumber/ nw
+
+
+
+      integer icalld1
+      save    icalld1
+      data    icalld1 /0/
+      real timet
+
+      logical partl         ! This is a dummy placeholder, used in cr()
+
+      ! begin timer
+      ptdum(35) = dnekclock()
+
+      nl = 0                ! No logicals exchanged
+
+      if (icalld1.eq.0 .or. (resetFindpts .eq. 1)) then
+         tolin = 1.e-12
+         if (wdsize.eq.4) tolin = 1.e-6
+         call intpts_setup  (tolin,i_fp_hndl)
+         call crystal_setup (i_cr_hndl,nekcomm,np)
+         icalld1 = icalld1 + 1
+c        resetFindpts = 0
+
+c        if (mod(nid,100).eq.1) then
+         if (nid.eq.0) then
+         print *, "before transfer, nid:", nid, "# particles:", n
+         endif
+      endif
+
+      call particles_in_nid
+
+      timet = DNEKCLOCK() 
+      call findpts(i_fp_hndl !  stride     !   call findpts( ihndl,
+     $           , ifpts(jrc,1),lif        !   $             rcode,1,
+     $           , ifpts(jpt,1),lif        !   &             proc,1,
+     $           , ifpts(je0,1),lif        !   &             elid,1,
+     $           , rfpts(jr ,1),lrf        !   &             rst,ndim,
+     $           , rfpts(jd ,1),lrf        !   &             dist,1,
+     $           , rfpts(jx ,1),lrf        !   &             pts(    1),1,
+     $           , rfpts(jy ,1),lrf        !   &             pts(  n+1),1,
+     $           , rfpts(jz ,1),lrf ,nfpts)    !   &             pts(2*n+1),1,n)
+
+      if ( nid .eq. 0) then
+         print *, "findpts", DNEKCLOCK()-timet
+         print *, "nfpts", nfpts
+      endif
+
+      nmax = iglmax(n,1)
+      if (nmax.gt.llpart) then
+         if (nid.eq.0) write(6,1) nmax,llpart
+    1    format('WARNING: Max number of particles:',
+     $   i9,'.  Not moving because llpart =',i9,'.')
+      else
+c        copy rfpts and ifpts back into their repsected positions in rpart and ipart
+         call update_findpts_info
+c        Move particle info to the processor that owns each particle
+
+c        using crystal router in log P time:
+
+         jps = jpid1-1     ! Pointer to temporary proc id for swapping
+         do i=1,n        ! Can't use jpt because it messes up particle info
+            ipart(jps,i) = ipart(jpt,i)
+         enddo
+         call crystal_tuple_transfer(i_cr_hndl,n,llpart
+     $              , ipart,ni,partl,nl,rpart,nr,jps)
+c        Sort by element number - for improved local-eval performance
+         call crystal_tuple_sort    (i_cr_hndl,n 
+     $              , ipart,ni,partl,nl,rpart,nr,je0,1)
+      endif
+
+c     if (mod(nid,100).eq.1) then
+      if (nid.eq.0) then
+          print *, 'nid: ', nid, '# particles: ', n
+     $         , nelt, ceiling(nw*1.0/nelgt)*nelt+n
+      endif 
+      ! end timer
+      pttime(35) = pttime(35) + dnekclock() - ptdum(35)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine particles_in_nid
+      include 'SIZE'
+      include 'CMTPART'
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+
+      ! begin timer
+      ptdum(36) = dnekclock()
+
+      nfpts = 0
+      do ip = 1,n
+         xloc = rpart(jx,ip)
+         yloc = rpart(jy,ip)
+         zloc = rpart(jz,ip)
+         itest = 0
+         do ie=1,nelt
+            if (xloc.ge.xerange(1,1,ie).and.xloc.le.xerange(2,1,ie))then
+            if (yloc.ge.xerange(1,2,ie).and.yloc.le.xerange(2,2,ie))then
+            if (zloc.ge.xerange(1,3,ie).and.zloc.le.xerange(2,3,ie))then
+                ipart(je0 ,ip) = ie-1
+                ipart(jrc ,ip) = 0
+                ipart(jpt ,ip) = nid
+                rpart(jd  ,ip) = 1.0 
+                rloc = -1.0 + 2.0*(xloc - xerange(1,1,ie))/
+     $                 (xerange(2,1,ie)-xerange(1,1,ie))
+                sloc = -1.0 + 2.0*(yloc - xerange(1,2,ie))/
+     $                 (xerange(2,2,ie)-xerange(1,2,ie))
+                tloc = -1.0 + 2.0*(zloc - xerange(1,3,ie))/
+     $                 (xerange(2,3,ie)-xerange(1,3,ie))
+                rpart(jr  ,ip) = rloc
+                rpart(jr+1,ip) = sloc
+                rpart(jr+2,ip) = tloc
+                itest = 1
+                goto 123
+            endif
+            endif
+            endif
+         enddo
+         if (itest.eq.0)then
+            nfpts = nfpts + 1
+            ifptsmap(nfpts) = ip
+            call copy (rfpts(1,nfpts),rpart(1,ip),nrf) 
+            call icopy(ifpts(1,nfpts),ipart(1,ip),nif) 
+            if(nfpts.gt.llpart)then
+               write(6,*)'Too many points crossing over ',
+     $                      nfpts,llpart,nid
+               call exitt
+            endif
+         endif
+123      continue
+      enddo
+
+      ! end timer
+      pttime(36) = pttime(36) + dnekclock() - ptdum(36)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine update_findpts_info
+      include 'SIZE'
+      include 'CMTPART'
+
+      ! begin timer
+      ptdum(37) = dnekclock()
+
+      do ifp = 1,nfpts
+         call copy(rpart(1,ifptsmap(ifp)),rfpts(1,ifp),nrf)
+         call icopy(ipart(1,ifptsmap(ifp)),ifpts(1,ifp),nif)
+      enddo
+
+      ! end timer
+      pttime(37) = pttime(37) + dnekclock() - ptdum(37)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine intpts_setup(tolin,ih)
+c
+c setup routine for interpolation tool
+c tolin ... stop point seach interation if 1-norm of the step in (r,s,t) 
+c           is smaller than tolin 
+c
+      include 'SIZE'
+      include 'GEOM'
+
+      common /nekmpi/ nidd,npp,nekcomm,nekgroup,nekreal
+
+      tol = tolin
+      if (tolin.lt.0) tol = 1e-13 ! default tolerance 
+
+      n       = lx1*ly1*lz1*lelt 
+      npt_max = 256
+      nxf     = 2*nx1 ! fine mesh for bb-test
+      nyf     = 2*ny1
+      nzf     = 2*nz1
+      bb_t    = 0.1 ! relative size to expand bounding boxes by
+c
+      if(nidd.eq.0) write(6,*) 'initializing intpts(), tol=', tol
+      call findpts_setup(ih,nekcomm,npp,ndim,
+     &                     xm1,ym1,zm1,nx1,ny1,nz1,
+     &                     nelt,nxf,nyf,nzf,bb_t,n,n,
+     &                     npt_max,tol)
+c       
+      return
+      end
+c-----------------------------------------------------------------------
+c     outside routines
+c-----------------------------------------------------------------------
+      FUNCTION ran2(idum)
+      INTEGER idum,IM1,IM2,IMM1,IA1,IA2,IQ1,IQ2,IR1,IR2,NTAB,NDIV 
+      REAL ran2,AM,EPS,RNMX
+      PARAMETER (IM1=2147483563,IM2=2147483399,AM=1./IM1,IMM1=IM1-1,
+     $        IA1=40014,IA2=40692,IQ1=53668,IQ2=52774,IR1=12211,
+     $        IR2=3791,NTAB=32,NDIV=1+IMM1/NTAB,EPS=1.2e-7,RNMX=1.-EPS)
+c Long period (> 2 ! 1018 ) random number generator of L’Ecuyer with 
+c Bays-Durham shuffle and added safeguards. Returns a uniform random deviate 
+c between 0.0 and 1.0 (exclusive of the endpoint values). 
+c Call with idum a negative integer to initialize; thereafter, do not alter 
+c idum between successive deviates in a sequence. RNMX should approximate the 
+c largest floating value that is less than 1.
+      INTEGER idum2,j,k,iv(NTAB),iy
+      SAVE iv,iy,idum2
+      DATA idum2/123456789/, iv/NTAB*0/, iy/0/
+      if (idum.le.0) then 
+         idum1=max(-idum,1) 
+         idum2=idum1
+         do j=NTAB+8,1,-1
+            k=idum1/IQ1
+            idum1=IA1*(idum1-k*IQ1)-k*IR1 
+            if (idum1.lt.0) idum1=idum1+IM1 
+            if (j.le.NTAB) iv(j)=idum1
+         enddo
+         iy=iv(1) 
+      endif
+      k=idum1/IQ1 
+      idum1=IA1*(idum1-k*IQ1)-k*IR1
+      if (idum1.lt.0) idum1=idum1+IM1 
+      k=idum2/IQ2 
+      idum2=IA2*(idum2-k*IQ2)-k*IR2 
+      if (idum2.lt.0) idum2=idum2+IM2 
+      j=1+iy/NDIV
+      iy=iv(j)-idum2
+      iv(j)=idum1 
+      if(iy.lt.1)iy=iy+IMM1 
+      ran2=min(AM*iy,RNMX)
+      return
+      END
+c----------------------------------------------------------------------
+c     routines not used currently
+c----------------------------------------------------------------------
+      subroutine point_to_grid_corr_init
+c
+c
+c
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'MASS'
+      include 'CMTDATA'
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+
+      integer i,j,k,e,ip
+      real    xx,yy,zz,msum
+
+      common /point2gridc/ p2gc,p2gforce,spl
+      real   p2gc(lx1,ly1,lz1,lelt,4),p2gforce(lelt),spl
+
+      if (nid.eq.0) write(6,*) 'Starting point_to_grid_corr_init'
+
+c     local mpi rank effects
+      do ie=1,nelt
+         xs = xerange(1,1,ie)
+         xe = xerange(2,1,ie)
+         ys = xerange(1,2,ie)
+         ye = xerange(2,2,ie)
+         zs = xerange(1,3,ie)
+         ze = xerange(2,3,ie)
+         xdelta = (xe-xs)/(nx1-1)
+         ydelta = (ye-ys)/(ny1-1)
+         zdelta = (ze-zs)/(nz1-1)
+         do k=1,nz1
+            zz = zs + (k-1)*zdelta
+         do j=1,ny1
+            yy = ys + (j-1)*ydelta
+         do i=1,nx1
+            xx = xs + (i-1)*xdelta
+            p2gc(i,j,k,ie,1) = xx
+            p2gc(i,j,k,ie,2) = yy 
+            p2gc(i,j,k,ie,3) = zz 
+         enddo
+         enddo
+         enddo
+      enddo
+
+      do ie=1,nelt
+      do k=1,nz1
+      do j=1,ny1
+      do i=1,nx1
+         xx = p2gc(i,j,k,ie,1) 
+         yy = p2gc(i,j,k,ie,2) 
+         zz = p2gc(i,j,k,ie,3) 
+         call compute_gamma_grid(ie,xx,yy,zz,p2gc(i,j,k,ie,4))
+      enddo
+      enddo
+      enddo
+      enddo
+
+      if (nid.eq.0) write(6,*) 'Ending point_to_grid_corr_init'
+
+      return
+      end
+c----------------------------------------------------------------------
+      subroutine compute_gamma_grid(ie,xx,yy,zz,gam_val)
+c
+c
+c
+      include 'SIZE'
+      include 'INPUT'
+      include 'GEOM'
+      include 'SOLN'
+      include 'MASS'
+      include 'CMTDATA'
+
+      integer e,er
+      real    msum,msum_total
+      real    xx,yy,zz,Lx,Ly,Lz
+      real    mesharound(81),gam_val,dumval(lx1,ly1,lz1,27)
+      real    xgd(lx1,ly1,lz1),ygd(lx1,ly1,lz1),zgd(lx1,ly1,lz1)
+
+      real   xerange(2,3,lelt)
+      common /elementrange/ xerange
+
+      xs = xerange(1,1,ie)
+      xe = xerange(2,1,ie)
+      ys = xerange(1,2,ie)
+      ye = xerange(2,2,ie)
+      zs = xerange(1,3,ie)
+      ze = xerange(2,3,ie)
+
+      Lx = xe - xs
+      Ly = ye - ys
+      Lz = ze - zs
+
+      mesharound = (/ 
+     >                0. ,0. ,0. , ! 1
+     >                -Lx,-Ly,0. , ! 2
+     >                0. ,-Ly,0. , ! 3
+     >                Lx ,-Ly,0. , ! 4
+     >                -Lx,0. ,0. , ! 5
+     >                Lx ,0. ,0. , ! 6
+     >                -Lx,Ly ,0. , ! 7
+     >                0. ,Ly ,0. , ! 8
+     >                Lx ,Ly ,0. , ! 9
+     >                0. ,0. ,-Lz, ! 10
+     >                -Lx,-Ly,-Lz, ! 11
+     >                0. ,-Ly,-Lz, ! 12
+     >                Lx ,-Ly,-Lz, ! 13
+     >                -Lx,0. ,-Lz, ! 14
+     >                Lx ,0. ,-Lz, ! 15
+     >                -Lx,Ly ,-Lz, ! 16
+     >                0. ,Ly ,-Lz, ! 17
+     >                Lx ,Ly ,-Lz, ! 18
+     >                0. ,0. ,Lz , ! 19
+     >                -Lx,-Ly,Lz , ! 20
+     >                0. ,-Ly,Lz , ! 21
+     >                Lx ,-Ly,Lz , ! 22
+     >                -Lx,0. ,Lz , ! 23
+     >                Lx ,0. ,Lz , ! 24
+     >                -Lx,Ly ,Lz , ! 25
+     >                0. ,Ly ,Lz , ! 26
+     >                Lx ,Ly ,Lz   ! 27
+     >                            /)
+
+      call rzero(dumval,lx1*ly1*lz1*27)
+
+      do iie=1,27         
+         ioff = (iie-1)*3
+         do k=1,ny1
+         do j=1,ny1
+         do i=1,nx1
+            xgd(i,j,k) = xm1(i,j,k,ie) + mesharound(ioff+1)
+            ygd(i,j,k) = ym1(i,j,k,ie) + mesharound(ioff+2)
+            zgd(i,j,k) = zm1(i,j,k,ie) + mesharound(ioff+3)
+         enddo
+         enddo
+         enddo
+
+         call point_to_grid(dumval(1,1,1,iie),1.,xx,yy,zz,1.,
+     >             xgd,ygd,zgd)
+c        do k=1,ny1
+c        do j=1,ny1
+c        do i=1,nx1
+c           print *, i,j,k,xgd(i,j,k),ygd(i,j,k),zgd(i,j,k),
+c    >               dumval(i,j,k,iie)
+c        enddo
+c        enddo
+c        enddo
+      enddo
+
+      msum = 0.
+      do iie=1,27
+         do k=1,nz1
+         do j=1,ny1
+         do i=1,nx1
+            msum = msum + dumval(i,j,k,iie)*bm1(i,j,k,ie)
+         enddo
+         enddo
+         enddo
+      enddo
+c     msum_total = glsum(msum,1)
+      gam_val = 1./msum
+
+      return
+      end
+c----------------------------------------------------------------------
+

@@ -1,0 +1,115 @@
+      COMMON /solnconsvar/ U(LX1,LY1,LZ1,TOTEQ,LELCMT) 
+ 
+      COMMON /otherpvar/ PHIG(LX1,LY1,LZ1,LELCMT)
+      COMMON /CMTRES/ res1(lx1,ly1,lz1,lelCMT,toteq) , res2(lx1,ly1,lz1,lelCMT,toteq) , res3(lx1,ly1,lz1,toteq,lelCMT) 
+
+      COMMON /CMTGRADU/  gradu(lx1,ly1,lz1,toteq,3)
+      
+      COMMON /CONVECTDATA/ convh (lxd*lyd*lzd,3) ,   totalh(lxd*lyd*lzd,3)
+
+      COMMON /FORCEDATA/   usrf (lx1,ly1,lz1,5)
+      COMMON /CMTGASPROP/ CSOUND(lx1,ly1,lz1,lelCMT)
+      real                 csound
+
+      COMMON /CMTGASREF/  cvgref,cpgref,gmaref,rgasref,molmass
+      real                cvgref,cpgref,gmaref,rgasref,molmass
+      COMMON /CMTTRANSPROP/ cip(2*ldim,lelCMT)
+      real cip
+      COMMON /CMTTRANSREF/ muref ,   coeflambda,suthcoef,reftemp,prlam,cip_adhoc
+      real muref,coeflambda,suthcoef,reftemp,prlam,cip_adhoc
+
+      COMMON /TSTEPSTAGE/  stage,nstage
+      integer              stage,nstage
+
+      COMMON /TIMESTEPCOEf/ tcoef(3,3)
+      
+      COMMON /CMTIOFLGS/   res_freq
+      integer              res_freq
+
+      COMMON /CMTVISCO/  ifbr1
+      logical            ifbr1
+      COMMON /CMTFLTRP/   NCUT, NCUTD, WGHT, WGHTD
+      real                 WGHT, WGHTD
+! index for gas density in vtrans, Q+-
+      parameter (irho=1) ! better always be 1
+! other VTRANS indices
+      parameter (icp =2) ! rho*cp
+      parameter (icv =3) ! rho*cv
+! indices in VDIFF
+      parameter (imu =1) ! viscosity
+      parameter (iknd=2) ! thermal conductivity
+      parameter (ilam=3) ! lambda, 2nd viscosity
+! indices for fields in U
+      parameter (irg =1)     ! phi_g*rho_g
+      parameter (irpu=2)     ! phi_g*rho_g*u
+      parameter (irpv=3)     ! phi_g*rho_g*v
+      parameter (irpw=4)     ! phi_g*rho_g*w
+      parameter (iret=toteq) ! phi_g*rho_g*E
+! indices for fields in Q-+
+      parameter (iux =2)     ! u
+      parameter (iuy =3)     ! v
+      parameter (iuz =4)     ! w
+      parameter (ipr =5)     ! P
+      parameter (ithm=6)     ! T
+      parameter (isnd=7)     ! a
+      parameter (iph =8)     ! phi_g
+      parameter (icvf=9)     ! rho*cv
+      parameter (icpf=10)    ! rho*cp
+      parameter (imuf=11)    ! mu
+      parameter (ikndf=12)   ! K
+      parameter (ilamf=13)   ! lambda
+      parameter (iu1=14)   ! U1
+      parameter (iu2=15)   ! U2
+      parameter (iu3=16)   ! U3
+      parameter (iu4=17)   ! U4
+      parameter (iu5=18)   ! U5
+      parameter (nqq=18)
+      COMMON /GPUDATA/   d_res3,d_u,d_res1,d_bm1,d_tcoef,d_jgl(lxd**3),d_jgt, &
+                        d_flux,d_w, d_vx, d_vy,d_vz, d_vxd, d_vyd, d_vzd, &
+                        d_vtrans, d_pr, d_area, d_phig, d_iface_flux, &
+                        d_totalh, d_ur, d_us, d_ut, d_ud, d_tu, d_rx, &
+                        d_dg, d_dgt, d_d, d_dt, d_jacmi, d_usrf, d_wghtc, &
+                        d_wghtf, d_unx, d_uny, d_unz, d_cbc, d_all, d_jaco_c
+      real, device :: d_res3(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_res1(lx1,ly1,lz1,lelt,toteq)
+      real, device :: d_bm1(lx1,ly1,lz1,lelt)
+      real, device :: d_tcoef(3,3)
+      real, device :: d_jgl
+      real, device :: d_jgt(lxd**3)
+      real, device :: d_flux(nqq*3*lx1*lz1*2*ldim*lelcmt)
+      real, device :: d_w(lelt*2*lxd*lxd*lxd)
+      real, device :: d_vx(lx1,ly1,lz1,lelt)
+      real, device :: d_vy(lx1,ly1,lz1,lelt)
+      real, device :: d_vz(lx1,ly1,lz1,lelt)
+      real, device :: d_vxd(lxd,lyd,lzd,lelt)
+      real, device :: d_vyd(lxd,lyd,lzd,lelt)
+      real, device :: d_vzd(lxd,lyd,lzd,lelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,lelt)
+      real, device :: d_pr(lx1,ly1,lz1,lelt)
+      real, device :: d_area(lx1,lz1,6,lelt)
+      real, device :: d_phig(lx1,ly1,lz1,lelt)
+      real, device :: d_iface_flux(lx1*lz1*6,lelt)
+      real, device :: d_totalh(lelt*3*lxd*lyd*lzd)
+      real, device :: d_ur(lelt*lxd*lyd*lzd)
+real, device :: d_us(lelt*lxd*lyd*lzd)
+      real, device :: d_ut(lelt*lxd*lyd*lzd)
+      real, device :: d_ud(lelt*lxd*lyd*lzd)
+      real, device :: d_tu(lelt*lxd*lyd*lzd)
+      real, device :: d_rx(lxd*lyd*lzd,9,lelt)
+      real, device :: d_dg(lxd*lyd*lzd)
+      real, device :: d_dgt(lxd*lyd*lzd)
+      real, device :: d_d(lxd*lyd*lzd)
+      real, device :: d_dt(lxd*lyd*lzd)
+      real, device :: d_jacmi(lx1*ly1*lz1,lelt)
+      real, device :: d_usrf(lx1,ly1,lz1,toteq)
+!      real, device :: d_vols(lx1,ly1,lz1,lelt,5)
+      real, device :: d_wghtc(lx1*lz1)
+      real, device :: d_wghtf(lxd*lzd)
+      real, device :: d_unx(lx1,lz1,6,lelt)
+      real, device :: d_uny(lx1,lz1,6,lelt)
+      real, device :: d_unz(lx1,lz1,6,lelt)
+      real, device :: d_cbc(lx1,lz1)
+      real, device :: d_all(lelt*6*lxd*lzd,26)
+      real, device :: d_jaco_c(lelt*6*lx1*lz1)
+

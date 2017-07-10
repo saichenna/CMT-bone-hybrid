@@ -1,0 +1,15 @@
+s1.rea
+3                      spatial dimension
+1                      number of fields
+#
+#    comments
+#
+#
+#========================================================
+#
+Box
+-64  -64  -8               nelx,nely,nelz for Box
+0.     10.   1.0          x0 x1 ratio
+0.     1.   1.0          x0 x1 ratio
+0.     1.   1.0          x0 x1 ratio
+P  ,P  ,P  ,P  ,P  ,P       bc's

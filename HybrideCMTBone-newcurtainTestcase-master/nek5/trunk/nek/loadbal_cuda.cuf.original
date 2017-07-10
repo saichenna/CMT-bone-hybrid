@@ -1,0 +1,470 @@
+!------------------------------------------------------------------
+      subroutine recompute_partitions
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'PARALLEL.cuf'
+      include 'TSTEP.cuf'
+
+      integer isGPU, num_sh, num_cores, shArray(2, lelt*6)
+      common /shareddata/ isGPU, num_sh, num_cores, shArray
+
+      !print *, "number of cores", num_cores, NID
+
+      if (isGPU .and. (istep .ne. 0)) then
+           !print *, "Working on GPU"
+           call recompute_partitions_gpu
+      else
+           !print *, "Working on CPU"
+           call recompute_partitions_cpu
+      endif
+
+       end
+!------------------------------------------------------------------
+!     recompute partitions
+       subroutine recompute_partitions_gpu
+          use cudafor
+          use glbvariable
+!         include 'SIZE.cuf'
+          include 'INPUT.cuf'
+          include 'PARALLEL.cuf'
+          include 'TSTEP.cuf'
+
+!         parameter (lr=16*ldim,li=5+6)
+          common /nekmpi/ nid_,np_,nekcomm,nekgroup,nekreal
+          common /elementload/ gfirst, inoassignd, &
+                     resetFindpts, pload(lelg)
+          integer gfirst, inoassignd, resetFindpts, pload
+
+          integer nw
+          common /particlenumber/ nw
+
+          real   xerange(2,3,lelt)
+          common /elementrange/ xerange
+
+          integer newgllnid(lelg), trans(3, lelg), trans_n, psum(lelg)
+          integer e,eg,eg0,eg1,mdw,ndw
+          integer ntuple, i, el, delta, nxyz
+          common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
+                      ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
+                      ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
+          common  /cparti/ ipart(li,lpart)
+          common  /iparti/ n,nr,ni
+          integer particleMap(3, lelt)
+          !include TSTEP1 to include TIME
+          COMMON /TSTEP1/ TIME,TIMEF,FINTIM,TIMEIO &
+                    ,DT,DTLAG(10),DTINIT,DTINVM,COURNO,CTARG &
+                    ,AB(10),BD(10),ABMSH(10) &
+                    ,AVDIFF(LDIMT1),AVTRAN(LDIMT1),VOLFLD(0:LDIMT1) &
+                    ,TOLREL,TOLABS,TOLHDF,TOLPDF,TOLEV,TOLNL,PRELAX &
+                    ,TOLPS,TOLHS,TOLHR,TOLHV,TOLHT(LDIMT1),TOLHE &
+                    ,VNRMH1,VNRMSM,VNRML2,VNRML8,VMEAN &
+                    ,TNRMH1(LDIMT),TNRMSM(LDIMT),TNRML2(LDIMT) &
+                    ,TNRML8(LDIMT),TMEAN(LDIMT)
+
+
+!         integer, device :: d_ipart(li,lpart)
+
+!         if(nid .eq. 0) then
+!             print *, 'old pload:'
+!             call printi(pload, nelgt)
+!         endif
+!         Step 1: Send number of particles in each element to Processor 0.
+          nxyz = nx1*ny1*nz1   !total # of grid point per element
+          delta = ceiling(nw*1.0/nelgt)
+          ntuple = nelt
+          do i=1,ntuple
+             eg = lglel(i)
+             particleMap(1,i) = eg
+             particleMap(2,i) = 0        ! processor id to send for element eg
+             particleMap(3, i) = 0      !  #of particles in each element, reinitialize to 0, otherwise it keeps the previous value
+          enddo
+          
+          istate = cudaMemcpy(ipart,d_ipart,ni*n,cudaMemcpyDevicetoHost)
+          !print *, 'nid: ', nid, 'ipart: ', ipart(1,1), ipart(2,1),& 
+            !ipart(3,1), lglel(ipart(3,1)+1)
+
+          do ip=1,n
+             el = ipart(je0, ip) + 1      ! element id in ipart is start from 0, so add 1
+             particleMap(3, el) = particleMap(3, el) + 1
+          enddo
+
+!         gas_right_boundary = exp(TIME/2.0)
+!         
+!         print *, 'GPU time: ', TIME, 'gas_right_boundary:',&
+!          gas_right_boundary
+
+          do i=1,ntuple
+!            x_left_boundary = xerange(1,1,i)
+!            if (x_left_boundary .lt. gas_right_boundary) then
+!            !if (vx(1,1,1,i) .ne. 0) then
+                particleMap(3, i) = particleMap(3, i) + delta
+!            else
+!               particleMap(3, i) = 0
+!               print *, 'element: ', particleMap(1,i), ' gas 0'
+!            endif
+          enddo
+
+          mdw=3
+          ndw=nelgt
+          key = 2  ! processor id is in wk(2,:)
+          call crystal_ituple_transfer(cr_h,particleMap, &
+                                      mdw,ntuple,ndw,key)
+
+!         print *, 'in gpu code'
+!         Step 2: Processor 0 sorts the elements according to global element id
+!                 Processor 0 also assigns new gllnid
+!         if (nid .eq. 0) then
+!            key=1
+!            nkey = 1
+!            call crystal_ituple_sort(cr_h,particleMap,mdw, &
+!                                    ntuple,key,nkey)
+!            do i=1,ntuple ! ntuple changed to toal number of elements after tuple transfer
+!               pload(i) = particleMap(3, i)
+!            enddo
+
+!            print *, 'new pload:'
+!            call printi(pload, nelgt)
+!            !print *, 'new pload/n'
+!            !call printr(newPload, lelt)
+!            call izero(psum, lelg)
+!            call preSum(pload, psum, nelgt)
+!            print *, 'recompute_partitions: psum(nelgt): ', psum(nelgt)
+!            !call printr(newPload, lelt)
+
+!            !print *, 'print new gllnid'
+!            call izero(newgllnid, lelg)
+!            call ldblce(psum, nelgt, newgllnid, np_)
+!            !call printi(newgllnid, lelt)
+!         endif
+          call bcast(newgllnid,4*lelg)
+
+          call izero(trans, 3*lelg)
+          call track_elements(gllnid, newgllnid, nelgt, trans, &
+                                    trans_n, lglel, lelt)
+!         print *, 'print trans'
+!         do 110 i=1, trans_n
+!           print *, trans(1, i), trans(2, i), trans(3, i)
+! 110  continue
+
+          print *, "finished track elements in processor", nid
+          call track_particles(trans, trans_n)
+          call mergePhigArray_gpu(newgllnid, trans, trans_n)
+          call mergeUArray_gpu(newgllnid)
+
+          call icopy(gllnid, newgllnid, lelg)
+
+          return
+          end
+
+!-------------------------------------------------------------------------------------------
+          subroutine mergePhigArray_gpu(newgllnid, trans, trans_n)
+          use cudafor
+          use glbvariable
+!         include 'SIZE.cuf'
+          include 'INPUT.cuf'
+          include 'PARALLEL.cuf'
+          include 'TSTEP.cuf'
+          include 'CMTDATA.cuf'
+
+!         common /gpuvariables/ d_phig(lx1,ly1,lz1,lelt)
+!         real, device :: d_phig
+
+          integer newgllnid(lelg), trans(3, lelg), trans_n
+          real phigarray(lx1*ly1*lz1, lelt)
+          integer procarray(3, lelg) !keke changed real to integer to use crystal_ituple_transfer
+          real tempphig(lx1*ly1*lz1, lelt)
+          logical partl
+          integer nl, sid, eid
+          integer key, nkey, ifirstelement, ilastelement, phig_n
+
+!         Step 1: Build phigarray for the elements to be transferred to neighboring processes.
+          index_n=1;
+          nl=0
+          nxyz = lx1*ly1*lz1
+          istate = cudaMemcpy(phig,d_phig,nelt*lx1*ly1*lz1, cudaMemcpyDevicetoHost)
+          do i=1, nelt
+              ieg = lglel(i)
+              if ((gllnid(ieg) .eq. nid) .and. &
+                          (gllnid(ieg) .ne. newgllnid(ieg))) then
+                  procarray(1, index_n) = gllnid(ieg)
+                  procarray(2, index_n) = newgllnid(ieg)
+                  procarray(3, index_n) = ieg
+                  do k=1, lz1
+                      do n=1, ly1
+                         do m=1, lx1
+                            ind=m+(n-1)*ly1+(k-1)*lz1*ly1
+                            phigarray(ind, index_n) = phig(m,n,k,i)
+                         enddo
+                      enddo
+                  enddo
+              index_n=index_n+1
+              endif
+          enddo
+          index_n=index_n-1
+
+!          print *, index_n, lelg, nid
+
+!         Step 2: Send/receive phigarray to/from neighbors
+          key=2
+          call crystal_tuple_transfer(cr_h, trans_n, nelgt, trans,&
+                         3, partl, nl, phigarray,nxyz,key)
+!         print *, 'nid: ', nid, 'received trans_n', trans_n      
+!         Step 2: Sort the received phigarray based on global element number
+          key=3
+          nkey=1
+          call crystal_tuple_sort(cr_h, trans_n, trans, 3, &
+                    partl, nl, phigarray, nxyz, key,nkey)
+
+!         Step 4: set start id and end id of phig of existing (not transferred) elements
+          !start id is the index of the first element that has not been sent to the left neighbor
+          !end id is the index of the last element that has not been sent to the right neighbor
+          sid=1
+          ifirstelement = lglel(sid)
+          phig_n=0
+          do i=1, index_n
+              !if (procarray(3,i) .lt. ifirstelement) then
+      !            set tempphig from phigarray
+                   !phig_n=phig_n+1
+                   !do j=1, nxyz
+                    !  tempphig(j,phig_n)=phigarray(j,i)
+                   !enddo
+              if (procarray(3,i) .eq. ifirstelement) then
+                       sid=sid+ 1
+                       ifirstelement=lglel(sid)
+              endif
+          enddo
+          eid = nelt
+          ilastelement = lglel(eid)
+          do i=index_n, 1, -1
+               if (procarray(3,i) .eq. ilastelement) then
+                   eid = eid -1
+                   ilastelement = lglel(eid)
+               endif
+          enddo
+
+!         Step 5: Update local phig based on elements 
+!                 a) received from left neighbor
+!                 b) existing elements
+!                 c) received from right neighbor
+          ifirstelement = lglel(sid)
+          do i=1, trans_n
+              if (trans(3, i) .lt. ifirstelement) then
+                  ! set tempphig from phigarray
+                   phig_n=phig_n+1
+                   do j=1, nxyz
+                      tempphig(j,phig_n)=phigarray(j,i)
+                   enddo
+              endif
+          enddo
+
+          if (sid .le. eid) then  !set tempphig from original phig
+              do i=sid, eid
+                  phig_n=phig_n+1
+                  do k=1, lz1
+                      do n=1, ly1
+                         do m=1, lx1
+                            ind=m+(n-1)*ly1+(k-1)*lz1*ly1
+                            tempphig(ind, phig_n) = phig(m,n,k,i)
+                         enddo
+                      enddo
+                  enddo
+              enddo
+          endif
+          ilastelement = lglel(eid)
+          do i=1, trans_n
+              if (trans(3, i) .gt. ilastelement) then
+                  ! set tempphig from phigarray
+                   phig_n=phig_n+1
+                   do j=1, nxyz
+                      tempphig(j,phig_n)=phigarray(j,i)
+                   enddo
+              endif
+          enddo
+          !copy tempphig to phig
+          do i=1, phig_n
+             do k=1, lz1
+                do n=1, ly1
+                    do m=1, lx1
+                        ind=m+(n-1)*ly1+(k-1)*lz1*ly1
+                        phig(m,n,k,i) = tempphig(ind, i)
+                    enddo
+                enddo
+             enddo
+          enddo
+          istate = cudaMemcpy(d_phig,phig,phig_n*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+       print *, "Update phig array: phig_n", phig_n
+       end
+!------------------------------------------------------------------
+          subroutine mergeUArray_gpu(newgllnid)
+          use cudafor
+          use glbvariable
+!         include 'SIZE.cuf'
+          include 'INPUT.cuf'
+          include 'PARALLEL.cuf'
+          include 'CMTDATA.cuf'
+
+
+          integer newgllnid(lelg), trans(3, lelg)
+          real uarray(lx1*ly1*lz1, lelt)
+          integer procarray(3, lelg) !keke changed real to integer to use crystal_ituple_transfer
+          real tempu(lx1*ly1*lz1, lelt)
+          logical partl
+          integer nl, sid, eid
+          integer key, nkey, ifirstelement, ilastelement, u_n, trans_n
+
+          index_n=1
+          trans_n=0
+          nxyz = lx1*ly1*lz1*toteq
+          nl=0
+          istate = cudaMemcpy(u,d_u,nelt*toteq*lx1*ly1*lz1,cudaMemcpyDevicetoHost)
+          do i=1, nelt
+              ieg = lglel(i)
+              if ((gllnid(ieg) .eq. nid) .and. &
+                          (gllnid(ieg) .ne. newgllnid(ieg))) then
+                  procarray(1, index_n) = gllnid(ieg)
+                  procarray(2, index_n) = newgllnid(ieg)
+                  procarray(3, index_n) = ieg
+                  trans(1, index_n) = gllnid(ieg)
+                  trans(2, index_n) = newgllnid(ieg)
+                  trans(3, index_n) = ieg
+                  do l=1, toteq
+                      do k=1, lz1
+                          do n=1, ly1
+                             do m=1, lx1
+                                ind=m+(n-1)*ly1+(k-1)*lz1*ly1+ & 
+                                                (l-1)*toteq*lz1*ly1
+                                uarray(ind, index_n) = u(m,n,k,l,i)
+                             enddo
+                          enddo
+                      enddo
+                  enddo
+              index_n=index_n+1
+              endif
+          enddo
+          index_n=index_n-1
+          trans_n=index_n
+!          print *, index_n, trans_n, lelt, nid
+
+          key=2
+          call crystal_tuple_transfer(cr_h, trans_n, nelgt, trans, &
+                         3, partl, nl, uarray,nxyz,key)
+!         print *, 'nid: ', nid, 'trans_n', trans_n      
+          key=3
+          nkey=1
+          call crystal_tuple_sort(cr_h, trans_n, trans, 3, &
+                    partl, nl, uarray, nxyz, key,nkey)
+
+          !Update u
+          ! set sid and eid
+          sid=1
+          ifirstelement = lglel(sid)
+          u_n=0
+          do i=1, index_n
+              if (procarray(3,i) .eq. ifirstelement) then
+                       sid=sid+ 1
+                       ifirstelement=lglel(sid)
+              endif
+          enddo
+          eid = nelt
+          ilastelement = lglel(eid)
+          do i=index_n, 1, -1
+               if (procarray(3,i) .eq. ilastelement) then
+                   eid = eid -1
+                   ilastelement = lglel(eid)
+               endif
+          enddo
+
+          ifirstelement = lglel(sid)
+          do i=1, trans_n
+              if (trans(3, i) .lt. ifirstelement) then
+                  ! set tempu from uarray
+                   u_n=u_n+1
+                   do j=1, nxyz
+                      tempu(j,u_n)=uarray(j,i)
+                   enddo
+              endif
+          enddo
+
+
+          if (sid .le. eid) then
+              do i=sid, eid      !set tempu from original u
+                  u_n=u_n+1
+                  do l=1, toteq
+                      do k=1, lz1
+                          do n=1, ly1
+                             do m=1, lx1
+                                ind=m+(n-1)*ly1+(k-1)*lz1*ly1+ &
+                                                (l-1)*toteq*lz1*ly1
+                                tempu(ind, u_n) = u(m,n,k,l,i)
+                             enddo
+                          enddo
+                      enddo
+                  enddo
+              enddo
+          endif
+          ilastelement = lglel(eid)
+          do i=1, trans_n
+              if (trans(3, i) .gt. ilastelement) then
+                  ! set tempu from uarray
+                   u_n=u_n+1
+                   do j=1, nxyz
+                      tempu(j,u_n)=uarray(j,i)
+                   enddo
+              endif
+          enddo
+          !copy tempu to u
+              do i=1, u_n
+                  do l=1, toteq
+                      do k=1, lz1
+                          do n=1, ly1
+                             do m=1, lx1
+                                ind=m+(n-1)*ly1+(k-1)*lz1*ly1+ &
+                                                (l-1)*toteq*lz1*ly1
+                                uarray(ind, index_n) = u(m,n,k,l,i)
+                                u(m,n,k,l,i) = tempu(ind, i)
+                             enddo
+                          enddo
+                      enddo
+                  enddo
+              enddo
+       istate = cudaMemcpy(d_u,u,u_n*toteq*lx1*ly1*lz1,cudaMemcpyHosttoDevice)
+       print *, "Update u array: u_n", u_n
+       end
+
+!-------------------------------------------------------------------------------
+      subroutine update_ipartje0_to_local_gpu
+      use cudafor
+      use glbvariable
+!     include 'SIZE.cuf'
+      include 'PARALLEL.cuf'
+
+!     parameter (lr=16*ldim,li=5+6)
+      common  /iparti/ n,nr,ni
+      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+      common  /cparti/ ipart(li,lpart) ! Minimal value of lr = 14*ndim+1
+      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
+                     ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
+                     ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
+      common /myparth/ i_fp_hndl, i_cr_hndl
+      integer ip, e
+      logical partl         ! This is a dummy placeholder, used in cr()
+!     integer, device :: d_ipart(li,lpart)
+!     real, device :: d_rpart(lr,lpart)
+
+      nl = 0
+!     istate = cudaMemcpy(ipart,d_ipart,ni*n,cudaMemcpyDevicetoHost)
+!     istate = cudaMemcpy(rpart,d_rpart,nr*n,cudaMemcpyDevicetoHost)
+
+      ip=0
+      do ip = 1, n
+         e = ipart(je0, ip)
+         ipart(je0, ip) = gllel(e) - 1  ! je0 start from 0
+      enddo
+!     Sort by element number 
+      call crystal_tuple_sort(i_cr_hndl,n &
+               , ipart,ni,partl,nl,rpart,nr,je0,1)
+      istate = cudaMemcpy(d_rpart,rpart,nr*n,cudaMemcpyHosttoDevice)
+      istate = cudaMemcpy(d_ipart,ipart,ni*n,cudaMemcpyHosttoDevice)
+
+      end
+

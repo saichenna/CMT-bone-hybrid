@@ -1,0 +1,229 @@
+./branches/adapt_mesh/makenek.inc:  cat SIZE | grep -i 'lpart' >/dev/null
+./branches/adapt_mesh/makenek.inc:     echo '      parameter(lpart = 1  ) ! max number of particles' >>SIZE
+./branches/adapt_mesh/postpro.f:      real    dist(lpart) ! squared distance
+./branches/adapt_mesh/postpro.f:      real    rst(lpart*ldim)
+./branches/adapt_mesh/postpro.f:      integer rcode(lpart),elid(lpart),proc(lpart)
+./branches/adapt_mesh/postpro.f:      if(n.gt.lpart) then
+./branches/adapt_mesh/postpro.f:     &   'ABORT: intpts() n>lpart, increase lpart in SIZE', n, lpart
+./branches/adapt_mesh/postpro.f:      parameter(lbuf=lpart)
+./branches/adapt_mesh/postpro.f:        if(nid.eq.0) write(6,*) 'ABORT: lbuf to small, increase lpart'
+./branches/moab_shared_tag_memory/makenek.inc:  cat SIZE | grep -i 'lpart' >/dev/null
+./branches/moab_shared_tag_memory/makenek.inc:     echo '      parameter(lpart = 1  ) ! max number of particles' >>SIZE
+./branches/moab_shared_tag_memory/postpro.f:      real    dist(lpart) ! squared distance
+./branches/moab_shared_tag_memory/postpro.f:      real    rst(lpart*ldim)
+./branches/moab_shared_tag_memory/postpro.f:      integer rcode(lpart),elid(lpart),proc(lpart)
+./branches/moab_shared_tag_memory/postpro.f:      if(n.gt.lpart) then
+./branches/moab_shared_tag_memory/postpro.f:     &   'ABORT: intpts() n>lpart, increase lpart in SIZE', n, lpart
+./branches/moab_shared_tag_memory/postpro.f:      parameter(lbuf=lpart)
+./branches/moab_shared_tag_memory/postpro.f:        if(nid.eq.0) write(6,*) 'ABORT: lbuf to small, increase lpart'
+./branches/mvmesh/makenek.inc:  cat SIZE | grep -i 'lpart' >/dev/null
+./branches/mvmesh/makenek.inc:     echo '      parameter(lpart = 1  ) ! max number of particles' >>SIZE
+./branches/mvmesh/postpro.f:      real    dist(lpart) ! squared distance
+./branches/mvmesh/postpro.f:      real    rst(lpart*ldim)
+./branches/mvmesh/postpro.f:      integer rcode(lpart),elid(lpart),proc(lpart)
+./branches/mvmesh/postpro.f:      if(n.gt.lpart) then
+./branches/mvmesh/postpro.f:     &   'ABORT: intpts() n>lpart, increase lpart in SIZE', n, lpart
+./branches/mvmesh/postpro.f:      parameter(lbuf=lpart)
+./branches/mvmesh/postpro.f:        if(nid.eq.0) write(6,*) 'ABORT: lbuf to small, increase lpart'
+./examples/3dboxHybrid.rhe/SIZE:      parameter(lpart = 64000  ) ! max number of particles
+./examples/3dboxHybrid.rhe/SIZE.cuf:      parameter(lpart = 64000  ) ! max number of particles
+./examples/3dboxHybrid.rhe/box.f:c     Code checks for n > lpart and will not move data if there
+./examples/3dboxHybrid.rhe/box.f:      real               rfpts(lrf,lpart)
+./examples/3dboxHybrid.rhe/box.f:      integer            ifpts(lif,lpart),fptsmap(lpart)
+./examples/3dboxHybrid.rhe/box.f:      if (nmax.gt.lpart) then
+./examples/3dboxHybrid.rhe/box.f:         if (nid.eq.0) write(6,1) nmax,lpart
+./examples/3dboxHybrid.rhe/box.f:     $   i9,'.  Not moving because lpart =',i9,'.')
+./examples/3dboxHybrid.rhe/box.f:         call crystal_tuple_transfer(i_cr_hndl,n,lpart
+./examples/3dboxHybrid.rhe/box.f:      real x(ldim,lpart),partv(lpart)
+./examples/3dboxHybrid.rhe/box.f:      common /scrns/ x_tmp(ldim+2,lpart),work(ldim+2,lpart)
+./examples/3dboxHybrid.rhe/box.f:     $              ,v_tmp(ldim+1,lpart)
+./examples/3dboxHybrid.rhe/box.f:      npass = npt_total / lpart
+./examples/3dboxHybrid.rhe/box.f:      if (npt_total.gt.npass*lpart) npass = npass+1
+./examples/3dboxHybrid.rhe/box.f:        mpart = min(lpart,npt_total-ilast)
+./examples/3dboxHybrid.rhe/box.f:        call rzero(x_tmp,(ldim+2)*lpart)
+./examples/3dboxHybrid.rhe/box.f:        call rzero(v_tmp,(ldim+1)*lpart)
+./examples/3dboxHybrid.rhe/box.f:        call gop(x_tmp,work,'+  ',(ldim+2)*lpart)
+./examples/3dboxHybrid.rhe/box.f:        call gop(v_tmp,work,'+  ',(ldim+1)*lpart)
+./examples/3dboxHybrid.rhe/box.f:      llpart = lpart
+./examples/3dboxHybrid.rhe/box.f:            if (l.gt.llpart)then 
+./examples/3dboxHybrid.rhe/box.f:c           to set lpart=2*n, so one may hold as many as 2n particles on any
+./examples/3dboxHybrid.rhe/box.f:c         There are two arrays, ipart(li,lpart) and rpart(li,lpart)
+./examples/3dboxHybrid.rhe/box.f:      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+./examples/3dboxHybrid.rhe/box.f:      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+./examples/3dboxHybrid.rhe/box.f:         call rzero(rpart,lr*lpart)
+./examples/3dboxHybrid.rhe/box.f:         call izero(ipart,li*lpart)
+./examples/3dboxHybrid.rhe/box.f:     $            ,xerange, nrf, nif, nfpts, nr, ni, n, lpart, nelt,
+./examples/3dboxHybrid.rhe/box.f:            if(nfpts.gt.lpart)then
+./examples/3dboxHybrid.rhe/box.f:     $                      nfpts,lpart,nid
+./examples/3dboxHybrid.rhe/box.usr:c     Code checks for n > lpart and will not move data if there
+./examples/3dboxHybrid.rhe/box.usr:      real               rfpts(lrf,lpart)
+./examples/3dboxHybrid.rhe/box.usr:      integer            ifpts(lif,lpart),fptsmap(lpart)
+./examples/3dboxHybrid.rhe/box.usr:      if (nmax.gt.lpart) then
+./examples/3dboxHybrid.rhe/box.usr:         if (nid.eq.0) write(6,1) nmax,lpart
+./examples/3dboxHybrid.rhe/box.usr:     $   i9,'.  Not moving because lpart =',i9,'.')
+./examples/3dboxHybrid.rhe/box.usr:         call crystal_tuple_transfer(i_cr_hndl,n,lpart
+./examples/3dboxHybrid.rhe/box.usr:      real x(ldim,lpart),partv(lpart)
+./examples/3dboxHybrid.rhe/box.usr:      common /scrns/ x_tmp(ldim+2,lpart),work(ldim+2,lpart)
+./examples/3dboxHybrid.rhe/box.usr:     $              ,v_tmp(ldim+1,lpart)
+./examples/3dboxHybrid.rhe/box.usr:      npass = npt_total / lpart
+./examples/3dboxHybrid.rhe/box.usr:      if (npt_total.gt.npass*lpart) npass = npass+1
+./examples/3dboxHybrid.rhe/box.usr:        mpart = min(lpart,npt_total-ilast)
+./examples/3dboxHybrid.rhe/box.usr:        call rzero(x_tmp,(ldim+2)*lpart)
+./examples/3dboxHybrid.rhe/box.usr:        call rzero(v_tmp,(ldim+1)*lpart)
+./examples/3dboxHybrid.rhe/box.usr:        call gop(x_tmp,work,'+  ',(ldim+2)*lpart)
+./examples/3dboxHybrid.rhe/box.usr:        call gop(v_tmp,work,'+  ',(ldim+1)*lpart)
+./examples/3dboxHybrid.rhe/box.usr:      llpart = lpart
+./examples/3dboxHybrid.rhe/box.usr:            if (l.gt.llpart)then 
+./examples/3dboxHybrid.rhe/box.usr:c           to set lpart=2*n, so one may hold as many as 2n particles on any
+./examples/3dboxHybrid.rhe/box.usr:c         There are two arrays, ipart(li,lpart) and rpart(li,lpart)
+./examples/3dboxHybrid.rhe/box.usr:      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+./examples/3dboxHybrid.rhe/box.usr:      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+./examples/3dboxHybrid.rhe/box.usr:         call rzero(rpart,lr*lpart)
+./examples/3dboxHybrid.rhe/box.usr:         call izero(ipart,li*lpart)
+./examples/3dboxHybrid.rhe/box.usr:     $            ,xerange, nrf, nif, nfpts, nr, ni, n, lpart, nelt,
+./examples/3dboxHybrid.rhe/box.usr:            if(nfpts.gt.lpart)then
+./examples/3dboxHybrid.rhe/box.usr:     $                      nfpts,lpart,nid
+Binary file ./examples/3dboxHybrid.rhe/nek5000 matches
+./examples/3dboxHybrid/SIZE:      parameter(lpart = 64000  ) ! max number of particles
+./examples/3dboxHybrid/SIZE.cuf:      parameter(lpart = 64000  ) ! max number of particles
+./examples/3dboxHybrid/box.f:c     Code checks for n > lpart and will not move data if there
+./examples/3dboxHybrid/box.f:      real               rfpts(lrf,lpart)
+./examples/3dboxHybrid/box.f:      integer            ifpts(lif,lpart),fptsmap(lpart)
+./examples/3dboxHybrid/box.f:      if (nmax.gt.lpart) then
+./examples/3dboxHybrid/box.f:         if (nid.eq.0) write(6,1) nmax,lpart
+./examples/3dboxHybrid/box.f:     $   i9,'.  Not moving because lpart =',i9,'.')
+./examples/3dboxHybrid/box.f:         call crystal_tuple_transfer(i_cr_hndl,n,lpart
+./examples/3dboxHybrid/box.f:      real x(ldim,lpart),partv(lpart)
+./examples/3dboxHybrid/box.f:      common /scrns/ x_tmp(ldim+2,lpart),work(ldim+2,lpart)
+./examples/3dboxHybrid/box.f:     $              ,v_tmp(ldim+1,lpart)
+./examples/3dboxHybrid/box.f:      npass = npt_total / lpart
+./examples/3dboxHybrid/box.f:      if (npt_total.gt.npass*lpart) npass = npass+1
+./examples/3dboxHybrid/box.f:        mpart = min(lpart,npt_total-ilast)
+./examples/3dboxHybrid/box.f:        call rzero(x_tmp,(ldim+2)*lpart)
+./examples/3dboxHybrid/box.f:        call rzero(v_tmp,(ldim+1)*lpart)
+./examples/3dboxHybrid/box.f:        call gop(x_tmp,work,'+  ',(ldim+2)*lpart)
+./examples/3dboxHybrid/box.f:        call gop(v_tmp,work,'+  ',(ldim+1)*lpart)
+./examples/3dboxHybrid/box.f:      llpart = lpart
+./examples/3dboxHybrid/box.f:            if (l.gt.llpart)then 
+./examples/3dboxHybrid/box.f:c           to set lpart=2*n, so one may hold as many as 2n particles on any
+./examples/3dboxHybrid/box.f:c         There are two arrays, ipart(li,lpart) and rpart(li,lpart)
+./examples/3dboxHybrid/box.f:      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+./examples/3dboxHybrid/box.f:      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+./examples/3dboxHybrid/box.f:         call rzero(rpart,lr*lpart)
+./examples/3dboxHybrid/box.f:         call izero(ipart,li*lpart)
+./examples/3dboxHybrid/box.f:     $            ,xerange, nrf, nif, nfpts, nr, ni, n, lpart, nelt,
+./examples/3dboxHybrid/box.f:            if(nfpts.gt.lpart)then
+./examples/3dboxHybrid/box.f:     $                      nfpts,lpart,nid
+./examples/3dboxHybrid/box.usr:c     Code checks for n > lpart and will not move data if there
+./examples/3dboxHybrid/box.usr:      real               rfpts(lrf,lpart)
+./examples/3dboxHybrid/box.usr:      integer            ifpts(lif,lpart),fptsmap(lpart)
+./examples/3dboxHybrid/box.usr:      if (nmax.gt.lpart) then
+./examples/3dboxHybrid/box.usr:         if (nid.eq.0) write(6,1) nmax,lpart
+./examples/3dboxHybrid/box.usr:     $   i9,'.  Not moving because lpart =',i9,'.')
+./examples/3dboxHybrid/box.usr:         call crystal_tuple_transfer(i_cr_hndl,n,lpart
+./examples/3dboxHybrid/box.usr:      real x(ldim,lpart),partv(lpart)
+./examples/3dboxHybrid/box.usr:      common /scrns/ x_tmp(ldim+2,lpart),work(ldim+2,lpart)
+./examples/3dboxHybrid/box.usr:     $              ,v_tmp(ldim+1,lpart)
+./examples/3dboxHybrid/box.usr:      npass = npt_total / lpart
+./examples/3dboxHybrid/box.usr:      if (npt_total.gt.npass*lpart) npass = npass+1
+./examples/3dboxHybrid/box.usr:        mpart = min(lpart,npt_total-ilast)
+./examples/3dboxHybrid/box.usr:        call rzero(x_tmp,(ldim+2)*lpart)
+./examples/3dboxHybrid/box.usr:        call rzero(v_tmp,(ldim+1)*lpart)
+./examples/3dboxHybrid/box.usr:        call gop(x_tmp,work,'+  ',(ldim+2)*lpart)
+./examples/3dboxHybrid/box.usr:        call gop(v_tmp,work,'+  ',(ldim+1)*lpart)
+./examples/3dboxHybrid/box.usr:c           to set lpart=2*n, so one may hold as many as 2n particles on any
+./examples/3dboxHybrid/box.usr:c         There are two arrays, ipart(li,lpart) and rpart(li,lpart)
+./examples/3dboxHybrid/box.usr:      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+./examples/3dboxHybrid/box.usr:      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+./examples/3dboxHybrid/box.usr:     $            ,xerange, nrf, nif, nfpts, nr, ni, n, lpart, nelt,
+./examples/3dboxHybrid/box.usr:            if(nfpts.gt.lpart)then
+./examples/3dboxHybrid/box.usr:     $                      nfpts,lpart,nid
+./examples/3dboxHybrid/box.usr:c     Code checks for n > lpart and will not move data if there
+./examples/3dboxHybrid/box.usr:      real               rfpts(lrf,lpart)
+./examples/3dboxHybrid/box.usr:      integer            ifpts(lif,lpart),fptsmap(lpart)
+./examples/3dboxHybrid/box.usr:      if (nmax.gt.lpart) then
+./examples/3dboxHybrid/box.usr:         if (nid.eq.0) write(6,1) nmax,lpart
+./examples/3dboxHybrid/box.usr:     $   i9,'.  Not moving because lpart =',i9,'.')
+./examples/3dboxHybrid/box.usr:         call crystal_tuple_transfer(i_cr_hndl,n,lpart
+Binary file ./examples/3dboxHybrid/nek5000 matches
+./trunk/nek/cmthybrid/cuda_functions.cu:__global__ void particles_in_nid(int *fptsmap, double *rfpts, int *ifpts, double *rpart, int *ipart, double *range, int nrf, int nif, int *nfpts, int nr, int ni, int n, int lpart, int nelt, int jx, int jy, int jz,int je0, int jrc, int jpt, int jd, int jr, int nid){
+./trunk/nek/cmthybrid/cuda_functions.cu:            if(old==lpart){
+./trunk/nek/cmthybrid/cuda_functions.cu:extern "C" void particles_in_nid_wrapper_(double *rfpts, int *ifpts, double *rpart, int *ipart, double *xerange, int *fptsmap, int *nrf, int *nif, int *nfpts, int *nr, int *ni, int *n, int *lpart, int *nelt, int *jx, int *jy, int *jz,int *je0, int *jrc, int *jpt, int *jd, int *jr, int *nid){
+./trunk/nek/cmthybrid/cuda_functions.cu:        cudaMalloc(&d_rfpts, lpart[0]*nrf[0]*sizeof(double));
+./trunk/nek/cmthybrid/cuda_functions.cu:        cudaMalloc(&d_fptsmap, lpart[0]*sizeof(int));
+./trunk/nek/cmthybrid/cuda_functions.cu:        cudaMalloc(&d_ifpts, lpart[0]*nif[0]*sizeof(int));
+./trunk/nek/cmthybrid/cuda_functions.cu:    particles_in_nid<<<gridSize, blockSize>>>(d_fptsmap, d_rfpts, d_ifpts, d_rpart, d_ipart, d_xerange, nrf[0], nif[0], d_nfpts, nr[0], ni[0], n[0], lpart[0], nelt[0], jx[0]-1, jy[0]-1, jz[0]-1, je0[0]-1, jrc[0]-1, jpt[0]-1, jd[0]-1, jr[0]-1, nid[0]);
+./trunk/nek/cmthybrid/diff.txt:> !                 d_fptsmap, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
+./trunk/nek/cmthybrid/diff.txt:<                 ,xerange, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
+./trunk/nek/cmthybrid/diff.txt:>                  d_fptsmap, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
+./trunk/nek/cmthybrid/level1.cuf:      real               rfpts(lrf,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer            ifpts(lif,lpart),fptsmap(lpart)
+./trunk/nek/cmthybrid/level1.cuf:      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+./trunk/nek/cmthybrid/level1.cuf:      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rpart(lr,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ipart(li,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_fptsmap(lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rfpts(lrf,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ifpts(lif,lpart)	
+./trunk/nek/cmthybrid/level1.cuf:      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+./trunk/nek/cmthybrid/level1.cuf:      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rpart(lr,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ipart(li,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_fptsmap(lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rfpts(lrf,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ifpts(lif,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+./trunk/nek/cmthybrid/level1.cuf:      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rpart(lr,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ipart(li,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_fptsmap(lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rfpts(lrf,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ifpts(lif,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rpart(lr,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ipart(li,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_fptsmap(lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rfpts(lrf,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ifpts(lif,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real               rfpts(lrf,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer            ifpts(lif,lpart),fptsmap(lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rpart(lr,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ipart(li,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_fptsmap(lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rfpts(lrf,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ifpts(lif,lpart)
+./trunk/nek/cmthybrid/level1.cuf:!                 d_fptsmap, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
+./trunk/nek/cmthybrid/level1.cuf:      if (nmax.gt.lpart) then
+./trunk/nek/cmthybrid/level1.cuf:         if (nid.eq.0) write(6,1) nmax,lpart
+./trunk/nek/cmthybrid/level1.cuf:                i9,'.  Not moving because lpart =',i9,'.')
+./trunk/nek/cmthybrid/level1.cuf:         call crystal_tuple_transfer(i_cr_hndl,n,lpart  &
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rpart(lr,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ipart(li,lpart)
+./trunk/nek/cmthybrid/level1.cuf:                 d_fptsmap, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rpart(nr,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ipart(ni,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_fptsmap(lpart)
+./trunk/nek/cmthybrid/level1.cuf:      real, device :: d_rfpts(lrf,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer, device :: d_ifpts(lif,lpart)	
+./trunk/nek/cmthybrid/level1.cuf:      real    rpart(nr,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      integer ipart(ni,lpart)
+./trunk/nek/cmthybrid/level1.cuf:      llpart = lpart
+./trunk/nek/cmthybrid/level1.cuf:      if ((end_pid-start_pid+1) .gt.llpart) then
+./trunk/nek/cmthybrid/level1.cuf:      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 14*ndim+1
+./trunk/nek/cmthybrid/level1.cuf:      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
+./trunk/nek/cmthybrid/level1.cuf:         call rzero(rpart,lr*lpart)
+./trunk/nek/cmthybrid/level1.cuf:         call izero(ipart,li*lpart)
+./trunk/nek/makenek.inc:  cat SIZE | grep -i 'lpart' >/dev/null
+./trunk/nek/makenek.inc:     echo '      parameter(lpart = 1  ) ! max number of particles/proc' >>SIZE
+./trunk/nek/makenek.inc.cmtbone:  cat SIZE | grep -i 'lpart' >/dev/null
+./trunk/nek/makenek.inc.cmtbone:     echo '      parameter(lpart = 1  ) ! max number of particles/proc' >>SIZE
+./trunk/nek/makenek.inc.cmtgpu:  cat SIZE | grep -i 'lpart' >/dev/null
+./trunk/nek/makenek.inc.cmtgpu:     echo '      parameter(lpart = 1  ) ! max number of particles/proc' >>SIZE
+./trunk/nek/makenek.inc.cmthybrid:  cat SIZE | grep -i 'lpart' >/dev/null
+./trunk/nek/makenek.inc.cmthybrid:     echo '      parameter(lpart = 1  ) ! max number of particles/proc' >>SIZE
+./trunk/nek/postpro.f:      real    dist(lpart) ! squared distance
+./trunk/nek/postpro.f:      real    rst(lpart*ldim)
+./trunk/nek/postpro.f:      integer rcode(lpart),elid(lpart),proc(lpart)
+./trunk/nek/postpro.f:      if(n.gt.lpart) then
+./trunk/nek/postpro.f:     &   'ABORT: intpts() n>lpart, increase lpart in SIZE', n, lpart
+./trunk/nek/postpro.f:      parameter(lbuf=lpart)
+./trunk/nek/postpro.f:        if(nid.eq.0) write(6,*) 'ABORT: lbuf to small, increase lpart'

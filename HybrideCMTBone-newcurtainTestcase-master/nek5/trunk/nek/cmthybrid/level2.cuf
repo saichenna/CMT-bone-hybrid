@@ -1,0 +1,230 @@
+      subroutine set_tstep_coef
+      include 'SIZE.cuf'
+      include 'TSTEP.cuf'
+
+      COMMON /TIMESTEPCOEf/ tcoef(3,3)
+
+      COMMON /TSTEPSTAGE/  stage,nstage
+      integer              stage,nstage
+
+      nstage = 3
+      do stage=1,nstage
+         if(stage.eq.1)then
+            tcoef(1,stage) = 0.0
+            tcoef(2,stage) = 1.0
+            tcoef(3,stage) = dt
+         endif
+         if(stage.eq.2)then
+            tcoef(1,stage) = 3.0/4.0
+            tcoef(2,stage) = 1.0/4.0
+            tcoef(3,stage) = dt/4.0
+         endif
+         if(stage.eq.3)then
+            tcoef(1,stage) = 1.0/3.0
+            tcoef(2,stage) = 2.0/3.0
+            tcoef(3,stage) = dt*2.0/3.0
+         endif
+      enddo
+      return
+      end
+
+!----------------------------------------------------------------------------------
+      subroutine cmt_flow_ics(ifrestart)
+      include 'SIZE.cuf'
+      include 'CMTDATA.cuf'
+      include 'SOLN.cuf'
+
+      integer e
+      nxyz1 = nx1*ny1*nz1
+      n     = nxyz1*lelcmt*toteq
+      !if (ifrestart)then
+         !do e=1,nelt
+            !call nekcopy(U(1,1,1,2,e),vx(1,1,1,e),nxyz1)
+            !call nekcopy(U(1,1,1,3,e),vy(1,1,1,e),nxyz1)
+            !call nekcopy(U(1,1,1,4,e),vz(1,1,1,e),nxyz1)
+            !call nekcopy(U(1,1,1,5,e),t(1,1,1,e,1),nxyz1)
+            !call nekcopy(U(1,1,1,1,e),pr(1,1,1,e),nxyz1)
+         !enddo
+      !endif
+
+      call nekrzero(res1,n) !- level3.txt
+      call nekrzero(res2,n) !- level3.txt
+      return
+      end
+
+      subroutine nekcopy(a,b,n)
+      real a(1),b(1)
+
+      do i=1,n
+         a(i)=b(i)
+      enddo
+
+      return
+      end
+
+!----------------------------------------------------------------------------------
+      subroutine compute_rhs_and_dt_gpu(d_vx,d_vy,d_vz,d_pr,d_vtrans, &
+         d_vxd,d_vyd,d_vzd,d_u, &
+         d_jgl,d_jgt, d_w,d_vols,d_flux,d_iface_flux,d_unx, d_uny, d_unz, &
+         d_area, d_wghtc, d_wghtf, d_cbc, d_all, d_jaco_c,d_res1, d_phig, &
+         d_totalh,d_ur,d_us, d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt, d_jacmi, &
+         d_bm1,d_usrf,d_d,d_dt)
+
+!> doxygen comments look like this
+      include 'SIZE.cuf'
+      include 'DG.cuf'      ! dg_face is stored
+      include 'CMTDATA.cuf'
+      include 'CTIMER.cuf'
+      include 'GEOM.cuf' 
+      include 'INPUT.cuf'
+      include 'SOLN.cuf'
+      include 'DEALIAS.cuf'
+      include 'MASS.cuf'
+
+      integer lfq,heresize,hdsize
+      parameter (ldg=lxd**3,lwkd=4*lxd*lxd)
+      parameter (lfq=lx1*lz1*2*ldim*lelcmt, &
+                        heresize=nqq*3*lfq,&
+                        hdsize=toteq*ldim*lfq)
+! not sure yet if viscous surface fluxes can live here yet
+      common /CMTSURFLX/ flux(heresize),ViscousStuff(hdsize)
+      real ViscousStuff
+
+      COMMON /pnttimers/ pt_time_add, pt_tracking_add
+      integer e,eq
+      real wkj(lx1+lxd)
+      character*32  dumchars
+      !parameter (ldg=lxd**3,lwkd=4*lxd*lxd)
+      common /dgrad/ jgl(ldg),jgt(ldg)
+      real jgl,jgt
+      real, device :: d_flux(hereSize)
+      real, device :: d_vols(lx1,ly1,lz1,lelt,5)
+      real, device :: d_vxd(lxd,lyd,lzd,lelt)
+      real, device :: d_vyd(lxd,lyd,lzd,lelt)
+      real, device :: d_vzd(lxd,lyd,lzd,lelt)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      real, device :: d_w(lelt*lwkd)
+      real, device :: d_iface_flux(lx1*lz1*6,lelt)
+      real, device :: d_wghtc(lx1*lz1)
+      real, device :: d_wghtf(lxd*lzd)
+      real, device :: d_unx(lx1,lz1,6,lelt)
+      real, device :: d_uny(lx1,lz1,6,lelt)
+      real, device :: d_unz(lx1,lz1,6,lelt)
+      real, device :: d_cbc(lx1,lz1)
+      real, device :: d_all(lelt*6*lxd*lzd,26)
+      real, device :: d_jaco_c(lelt*6*lx1*lz1)
+      real, device :: d_area(lx1,lz1,6,lelt)
+      real, device :: d_phig(lx1,ly1,lz1,lelt)
+      real, device :: d_res1(lx1,ly1,lz1,lelt,toteq)
+      real, device :: d_bm1(lx1,ly1,lz1,lelt)
+      real, device :: d_totalh(lelt*3*lxd*lyd*lzd)
+      real, device :: d_ur(lelt*lxd*lyd*lzd) 
+      real, device :: d_us(lelt*lxd*lyd*lzd)
+      real, device :: d_ut(lelt*lxd*lyd*lzd)
+      real, device :: d_ud(lelt*lxd*lyd*lzd)
+      real, device :: d_tu(lelt*lxd*lyd*lzd)
+      real, device :: d_rx(lxd*lyd*lzd,9,lelt)
+      real, device :: d_dg(lxd*lyd*lzd)
+      real, device :: d_dgt(lxd*lyd*lzd)
+      real, device :: d_d(lxd*lyd*lzd)
+      real, device :: d_dt(lxd*lyd*lzd)
+      real, device :: d_jacmi(lx1*ly1*lz1,lelt)
+      real, device :: d_usrf(lx1,ly1,lz1,toteq)  
+
+      real, device :: d_vx(lx1,ly1,lz1,lelt)
+      real, device :: d_vy(lx1,ly1,lz1,lelt)
+      real, device :: d_vz(lx1,ly1,lz1,lelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,lelt)
+      real, device :: d_pr(lx1,ly1,lz1,lelt)
+
+      call set_dealias_face
+
+!     filter the conservative variables before start of each
+!     time step
+      if(stage.gt.1) call computeprimitivevarswrapper(d_vx, &
+                        d_vy,d_vz, &
+                        d_vxd,d_vyd,d_vzd,d_u,d_jgl,d_jgt,d_w, lxd, &
+                        lx1, nelt, toteq, irpu, irpv, &
+                        irpw, irg, lwkd)
+      call fluxes_full_field_gpu(d_vols,d_flux,d_iface_flux,d_u,d_unx, &
+          d_uny, d_unz, d_area, d_wghtc, d_wghtf, d_cbc, d_jgl, d_jgt, &
+          d_all, d_jaco_c)!- level3.txt
+      ntot = lx1*ly1*lz1*lelcmt*toteq
+      !print *,lx1,ly1,lz1,lelcmt,toteq
+!      call rzero(res1,ntot)
+
+      nstate=nqq
+      nfq=nx1*nz1*2*ndim*nelt
+      iqm =1
+      iqp =iqm+nstate*nfq
+      iflx=iqp+nstate*nfq
+!      do eq=1,toteq
+!         ieq=(eq-1)*ndg_face+iflx
+!         call surface_integral_full(res1(1,1,1,1,eq),flux(ieq)) !- level3.txt
+!      enddo
+
+      call surfaceintegralwrapper(d_flux(iflx),d_area,d_phig,d_res1, &
+                       d_iface_flux,toteq,nx1,ny1,nz1,nelt,2*ndim)
+      iuj=iflx ! overwritten with [[U]]
+
+!      print *,'hiii',nelt,toteq
+      call computestageWrapper(d_jgl,d_jgt,d_totalh,d_u,d_ur,d_us,d_phig, &
+      d_pr,d_vxd,d_vyd,d_vzd,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_res1, &
+      d_w,d_jacmi,d_bm1,d_usrf,d_d,d_dt,nelt,toteq,ndim,lwkd,nx1,lxd)
+
+!      call assemble_flux_compute_gpu(d_jgl,d_jgt,d_totalh,d_u,d_ur,  &
+!      d_us,d_phig, d_vols(1,1,1,1,5),d_vxd,d_vyd,d_vzd,d_ut,d_ud,d_tu, &
+!      d_rx,d_dg,d_dgt, d_res1,d_w,d_jacmi,d_bm1,d_usrf,d_d,d_dt,nelt, &
+!      toteq,lwkd)
+!      do e=1,nelt
+! Get user defined forcing from userf defined in usr file
+         ! Bone: call cmtusrf(e)
+         ! Bone: if (ifvisc)then
+             ! Bone: call compute_gradients(e)
+! compute_aux_var will likely not be called if Sij=GdU
+             ! Bone: call compute_aux_var(e)
+!------------------------------
+! NB!!!!! gradu=Sij, NOT dUl/dxk!!!!
+!------------------------------
+         ! Bone: endif
+!         do eq=1,toteq
+! Now we can start assembling the flux terms in all 5 eqs
+! Flux terms are decomposed into h_conv and h_diff
+!            call assemble_h(e,eq, jgl(i),jgt(i)) !- level3.txt
+! compute the volume integral term and assign to res1
+!            call flux_div_integral(e,eq, jgl(i), jgt(i)) !- level3.txt
+            !call surface_integral_elm(e,eq) !- level3.txt
+!------------------------------
+! JH050615 BR1 ONLY for now
+!           if (.not.ifbr1)
+!    >      call penalty(flux(iqm),flux(iqp),flux(iuj),e,eq,nstate)
+!------------------------------
+! Compute the forcing term in each of the 5 eqs
+! Add this to the residue
+!            call compute_forcing(e,eq) !- level3.txt
+!         enddo
+!      enddo
+      return
+      end
+
+!-----------------------------------------------------------------------
+
+      subroutine setup_cmt_commo
+      include 'SIZE.cuf'
+      include 'DG.cuf'
+
+      parameter(lf=lx1*lz1*2*ldim*lelcmt)
+      common /c_is1/ glo_num_face(lf) &
+                  , glo_num_vol((lx1+2)*(ly1+2)*(lz1+2)*lelcmt)
+      integer*8 glo_num_face,glo_num_vol,ngv,nf
+
+      call setup_cmt_gs(dg_hndl,nx1,ny1,nz1,nelt,nelgt,vertex, &
+                       glo_num_vol,glo_num_face)
+      call cmt_set_fc_ptr(nelt,nx1,ny1,nz1,ndg_face,iface_flux)
+
+      return
+      end
+
+

@@ -1,0 +1,1348 @@
+diff cmt/ausm.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/ausm.f
+42,43c42,43
+<       SUBROUTINE AUSM_FluxFunction(ntot,nx,ny,nz,nm,fs,rl,ul,vl,wl,pl,
+<      >                         al,tl,rr,ur,vr,wr,pr,ar,tr,flx,cpl,cpr)
+---
+>       SUBROUTINE AUSM_FluxFunction(nx,ny,nz,nm,fs,rl,ul,vl,wl,pl,
+>      >                                Hl,al,rr,ur,vr,wr,pr,Hr,ar,flx,vf)
+46,50d45
+< ! ******************************************************************************
+< ! Definitions and declarations
+< ! ******************************************************************************
+<       real MixtPerf_Ho_CpTUVW
+<       external MixtPerf_Ho_CpTUVW
+55,60c50,53
+<       integer ntot
+<       REAL al(ntot),ar(ntot),fs(ntot),nm(ntot),nx(ntot),ny(ntot),
+<      >     nz(ntot),pl(ntot),pr(ntot),rl(ntot),rr(ntot),ul(ntot),
+<      >     ur(ntot),vl(ntot),vr(ntot),wl(ntot),wr(ntot),cpl(ntot),
+<      >     cpr(ntot),tl(ntot),tr(ntot)! INTENT(IN) ::
+<       REAL flx(ntot,5)!,vf(3) ! INTENT(OUT) ::
+---
+> 
+>       REAL al,ar,fs,Hl,Hr,nm,nx,ny,nz,pl,pr,rl,rr,ul,ur,! INTENT(IN) ::
+>      >                    vl,vr,wl,wr
+>       REAL flx(5),vf(3) ! INTENT(OUT) ::
+67c60
+<      >        wtl,wtr,Hl,Hr
+---
+>      >        wtl,wtr
+72,73d64
+<       call invcol2(cpl,rl,ntot)
+<       call invcol2(cpr,rr,ntot)
+75,110c66,72
+<       do i=1,ntot
+<          Hl = MixtPerf_Ho_CpTUVW(cpl(i),tl(i),ul(i),vl(i),wl(i))
+<          Hr = MixtPerf_Ho_CpTUVW(cpr(i),tr(i),ur(i),vr(i),wr(i))
+< 
+<          ql = ul(i)*nx(i) + vl(i)*ny(i) + wl(i)*nz(i) - fs(i)
+<          qr = ur(i)*nx(i) + vr(i)*ny(i) + wr(i)*nz(i) - fs(i)
+< 
+<          af = 0.5*(al(i)+ar(i)) ! NOTE not using original formulation, see note
+<          ml  = ql/af
+<          mla = ABS(ml)
+< 
+<          mr  = qr/af
+<          mra = ABS(mr)    
+< 
+<          IF ( mla .le. 1.0 ) THEN 
+<             mlp = 0.25*(ml+1.0)*(ml+1.0) + 0.125*(ml*ml-1.0)*(ml*ml-1.0)
+<             wtl = 0.25*(ml+1.0)*(ml+1.0)*(2.0-ml) +
+<      >            0.1875*ml*(ml*ml-1.0)*(ml*ml-1.0)
+<          ELSE
+<             mlp = 0.5*(ml+mla)
+<             wtl = 0.5*(1.0+ml/mla)
+<          END IF ! mla
+< 
+<          IF ( mra .le. 1.0 ) THEN 
+<             mrm = -0.25*(mr-1.0)*(mr-1.0)-0.125*(mr*mr-1.0)*(mr*mr-1.0)
+<             wtr = 0.25*(mr-1.0)*(mr-1.0)*(2.0+mr) -
+<      >            0.1875*mr*(mr*mr-1.0)*(mr*mr-1.0)
+<          ELSE
+<             mrm = 0.5*(mr-mra)
+<             wtr = 0.5*(1.0-mr/mra)
+<          END IF ! mla
+< 
+<          mf  = mlp + mrm
+<          mfa = ABS(mf)
+<          mfp = 0.5*(mf+mfa)
+<          mfm = 0.5*(mf-mfa)
+---
+>       ql = ul*nx + vl*ny + wl*nz - fs
+>       qr = ur*nx + vr*ny + wr*nz - fs
+> 
+>       af = 0.5*(al+ar) ! NOTE not using original formulation, see note
+> 
+>       ml  = ql/af
+>       mla = ABS(ml)
+112c74,100
+<          pf = wtl*pl(i) + wtr*pr(i)
+---
+>       mr  = qr/af
+>       mra = ABS(mr)    
+> 
+>       IF ( mla .le. 1.0 ) THEN 
+>          mlp = 0.25*(ml+1.0)*(ml+1.0) + 0.125*(ml*ml-1.0)*(ml*ml-1.0)
+>          wtl = 0.25*(ml+1.0)*(ml+1.0)*(2.0-ml) +
+>      >         0.1875*ml*(ml*ml-1.0)*(ml*ml-1.0)
+>       ELSE
+>          mlp = 0.5*(ml+mla)
+>          wtl = 0.5*(1.0+ml/mla)
+>       END IF ! mla
+> 
+>       IF ( mra .le. 1.0 ) THEN 
+>          mrm = -0.25*(mr-1.0)*(mr-1.0)-0.125*(mr*mr-1.0)*(mr*mr-1.0)
+>          wtr = 0.25*(mr-1.0)*(mr-1.0)*(2.0+mr) -
+>      >         0.1875*mr*(mr*mr-1.0)*(mr*mr-1.0)
+>       ELSE
+>          mrm = 0.5*(mr-mra)
+>          wtr = 0.5*(1.0-mr/mra)
+>       END IF ! mla
+> 
+>       mf  = mlp + mrm
+>       mfa = ABS(mf)
+>       mfp = 0.5*(mf+mfa)
+>       mfm = 0.5*(mf-mfa)
+> 
+>       pf = wtl*pl + wtr*pr 
+118,131c106,114
+< !        vf(1) = mfp*ul + mfm*ur ! I'm sure we'll need this someday
+< !        vf(2) = mfp*vl + mfm*vr
+< !        vf(3) = mfp*wl + mfm*wr
+< 
+<          flx(i,1)=(af*(mfp*rl(i)      +mfm*rr(i)   )        )*nm(i)
+<          flx(i,2)=(af*(mfp*rl(i)*ul(i)+mfm*rr(i)*ur(i))+pf*nx(i))*
+<      >            nm(i)
+<          flx(i,3)=(af*(mfp*rl(i)*vl(i)+mfm*rr(i)*vr(i))+pf*ny(i))*
+<      >            nm(i)
+<          flx(i,4)=(af*(mfp*rl(i)*wl(i)+mfm*rr(i)*wr(i))+pf*nz(i))*
+<      >            nm(i)
+<          flx(i,5)=(af*(mfp*rl(i)*Hl   +mfm*rr(i)*Hr) + pf*fs(i))*
+<      >            nm(i)
+<       enddo
+---
+>       vf(1) = mfp*ul + mfm*ur
+>       vf(2) = mfp*vl + mfm*vr
+>       vf(3) = mfp*wl + mfm*wr    
+> 
+>       flx(1) = (af*(mfp*rl    + mfm*rr   )        )*nm
+>       flx(2) = (af*(mfp*rl*ul + mfm*rr*ur) + pf*nx)*nm
+>       flx(3) = (af*(mfp*rl*vl + mfm*rr*vr) + pf*ny)*nm
+>       flx(4) = (af*(mfp*rl*wl + mfm*rr*wr) + pf*nz)*nm
+>       flx(5) = (af*(mfp*rl*Hl + mfm*rr*Hr) + pf*fs)*nm
+132a116,118
+> ! ******************************************************************************
+> ! End
+> ! ******************************************************************************
+138c124
+<       SUBROUTINE CentralInviscid_FluxFunction(ntot,nx,ny,nz,fs,ul,pl,
+---
+>       SUBROUTINE CentralInviscid_FluxFunction(nx,ny,nz,fs,ul,pl,
+141,171c127,149
+< ! JH111815 HEY GENIUS THIS MAY BE SECOND ORDER AND THUS KILLING YOUR
+< !          CONVERGENCE. REPLACE WITH AUSM AND SHITCAN IT
+< ! JH112015 This isn't why walls aren't converging. There's something
+< !          inherently second-order about your wall pressure. Think!
+<       real nx(ntot),ny(ntot),nz(ntot),fs(ntot),ul(ntot,5),pl(ntot),
+<      >     ur(ntot,5),pr(ntot) ! intent(in)
+<       real flx(ntot,5)! intent(out),dimension(5) ::
+< 
+<       do i=1,ntot
+<          rl =ul(i,1)
+<          rul=ul(i,2)
+<          rvl=ul(i,3)
+<          rwl=ul(i,4)
+<          rel=ul(i,5)
+< 
+<          rr =ur(i,1)
+<          rur=ur(i,2)
+<          rvr=ur(i,3)
+<          rwr=ur(i,4)
+<          rer=ur(i,5)
+< 
+<          ql = (rul*nx(i) + rvl*ny(i) + rwl*nz(i))/rl - fs(i)
+<          qr = (rur*nx(i) + rvr*ny(i) + rwr*nz(i))/rr - fs(i)
+< 
+<          flx(i,1) = 0.5*(ql* rl+ qr*rr               )
+<          flx(i,2) = 0.5*(ql* rul+pl(i)*nx(i) + qr* rur     +pr(i)*nx(i))
+<          flx(i,3) = 0.5*(ql* rvl+pl(i)*ny(i) + qr* rvr     +pr(i)*ny(i))
+<          flx(i,4) = 0.5*(ql* rwl+pl(i)*nz(i) + qr* rwr     +pr(i)*nz(i))
+<          flx(i,5) = 0.5*(ql*(rel+pl(i))+pl(i)*fs(i)+qr*(rer+pr(i))+
+<      >               pr(i)*fs(i))
+<       enddo
+---
+>       real nx,ny,nz,fs,ul(5),pl,ur(5),pr ! intent(in)
+>       real flx(5)! intent(out),dimension(5) ::
+> 
+>       rl =ul(1)
+>       rul=ul(2)
+>       rvl=ul(3)
+>       rwl=ul(4)
+>       rel=ul(5)
+> 
+>       rr =ur(1)
+>       rur=ur(2)
+>       rvr=ur(3)
+>       rwr=ur(4)
+>       rer=ur(5)
+> 
+>       ql = (rul*nx + rvl*ny + rwl*nz)/rl - fs
+>       qr = (rur*nx + rvr*ny + rwr*nz)/rr - fs
+> 
+>       flx(1) = 0.5*(ql* rl                + qr* rr               )
+>       flx(2) = 0.5*(ql* rul       + pl*nx + qr* rur       + pr*nx)
+>       flx(3) = 0.5*(ql* rvl       + pl*ny + qr* rvr       + pr*ny)
+>       flx(4) = 0.5*(ql* rwl       + pl*nz + qr* rwr       + pr*nz)
+>       flx(5) = 0.5*(ql*(rel + pl) + pl*fs + qr*(rer + pr) + pr*fs)
+diff cmt/CMTDATA /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/CMTDATA
+24c24
+<       COMMON /CMTGASPROP/ CSOUND(lx1,ly1,lz1,lelCMT)
+---
+>       COMMON /CMTGASPROP/ CSOUND(lxd,lyd,lzd,lelCMT)
+Common subdirectories: cmt/CVS and /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/CVS
+diff cmt/DG /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/DG
+7,9d6
+< 
+<       common /facewz/ wghtc(lx1*lz1), wghtf(lxd*lzd)
+<      >              , zptf(lxd),wgtf(lxd)
+diff cmt/diagnostics.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/diagnostics.f
+211c211
+< 101   format(8(3x,e12.5))
+---
+> 101   format(8(3x,f12.5))
+220d219
+<       INCLUDE 'TSTEP'
+258c257
+<      $   write(144,*)'Time ',time,'Mass ',total_mass
+---
+>      $   write(144,*)'Total mass in the domain ',total_mass
+diff cmt/drive1_cmt.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/drive1_cmt.f
+40d39
+< c        call exitt
+43,46d41
+< ! JH111815 soon....
+< !        do eq=1,toteq
+< !           call fbinvert(res1(1,1,1,1,eq))
+< !        enddo
+61,62d55
+< ! JH111815 in fact, I'd like to redo the time marching stuff above and
+< !          have an fbinvert call for res1
+91c84
+<       include 'DG'
+---
+>       include 'DG'      ! dg_face is stored
+99c92
+< ! not sure if viscous surface fluxes can live here yet
+---
+> ! not sure yet if viscous surface fluxes can live here yet
+108,110c101
+<       call set_dealias_face
+< !     call set_dealias_rx ! done in set_convect_cons,
+< ! JH113015                ! now called from compute_primitive_variables
+---
+>       call set_rxgll
+116c107,108
+< !        primitive vars = rho, u, v, w, p, T, phi_g
+---
+> ! compute primitive vars on the FINE grid. Required to compute conv fluxes.
+> !        primitive vars = rho, u, v, w, p, T, phi_p
+149c141
+<       nfq=nx1*nz1*2*ndim*nelt
+---
+>       nfq=nx1*nz1*2*ldim*nelt
+174a167,168
+> ! Now we can start assembling the flux terms in all 5 eqs
+> ! Flux terms are decomposed into h_conv and h_diff
+176c170
+< ! compute the volume integral term and add to res1(:,e,eq)
+---
+> ! compute the volume integral term and assign to res1
+177a172
+>             call surface_integral_elm(e,eq)
+183a179
+> ! Add this to the residue
+247,248c243,244
+<             call copy(U(1,1,1,5,e),t(1,1,1,e,1),nxyz1) 
+<             call copy(U(1,1,1,1,e),pr(1,1,1,e),nxyz1) 
+---
+>             call copy(U(1,1,1,5,e),t(1,1,1,e,3),nxyz1) 
+>             call copy(U(1,1,1,1,e),t(1,1,1,e,2),nxyz1) 
+diff cmt/driver3_cmt.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/driver3_cmt.f
+7d6
+<       include 'DEALIAS' ! until we are comfortable with setup_convect
+41,53d39
+< 
+< ! setup_convect has the desired effect
+< ! if IFPART=F
+< ! if IFCHAR=F
+< ! if IFCONS=T
+< ! if igeom .ne. 1
+< ! if param(99) .ge. 0
+< !-----------------------------------------------------------------------
+< !     call setup_convect(0)
+< !-----------------------------------------------------------------------
+< ! to make life easier until we master this stuff and harmonize even better with nek,
+< ! I'm including 'DEALIAS' and calling set_convect_cons here
+<       call set_convect_cons (vxd,vyd,vzd,vx,vy,vz)
+diff cmt/eqnsolver_cmt.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/eqnsolver_cmt.f
+21,23d20
+< ! computed as products between primitive variables and conserved variables.
+< ! if you want to write rho u_i u_j as (rho u_i) (rho u_j) (rho^{-1}), this
+< ! is the place to do it
+29,32c26
+< 
+<       parameter (ldd=lxd*lyd*lzd)
+<       common /ctmp1/ ju1(ldd),ju2(ldd)!,ur(ldd),us(ldd),ud(ldd),tu(ldd)
+<       real ju1,ju2
+---
+>      
+35c29,30
+<       n=nxd*nyd*nzd
+---
+> ! we add the convective fluxes, pressure and other terms
+>       n = nx1*ny1*nz1
+37c32
+<       if (eq .eq. 1) then ! convective flux of mass=rho u_j=U_{j+1}
+---
+>       call copy(convh(1,1),u(1,1,1,eq,e),n)
+39,41c34
+<          do j=1,ndim
+<             call intp_rstd(convh(1,j),u(1,1,1,eq+j,e),nx1,nxd,if3d,0)
+<          enddo
+---
+>       if (eq .eq. 1) then
+43c36,42
+<       else
+---
+>          call copy(convh(1,2),convh(1,1),n)
+>          if (if3d) then
+>             call copy(convh(1,3),convh(1,1),n)
+>             call col2(convh(1,3),vz(1,1,1,e),n)
+>          endif
+>          call col2(convh(1,1),vx(1,1,1,e),n)
+>          call col2(convh(1,2),vy(1,1,1,e),n)
+45,46c44
+<          call intp_rstd(ju1,phig(1,1,1,e),nx1,nxd,if3d,0)
+<          call intp_rstd(ju2,pr(1,1,1,e),nx1,nxd,if3d,0)
+---
+>       elseif (eq .lt. 5) then
+48c46,48
+<          if (eq .lt. 5) then ! self-advection of rho u_i by rho u_i u_j
+---
+>          do j=2,ldim
+>             call copy(convh(1,j),convh(1,1),n)
+>          enddo
+50,68c50,60
+<             call intp_rstd(convh(1,1),u(1,1,1,eq,e),nx1,nxd,if3d,0)
+<             do j=2,ndim
+<                call copy(convh(1,j),convh(1,1),n)
+<             enddo
+<             call col2(convh(1,1),vxd(1,1,1,e),n)
+<             call col2(convh(1,2),vyd(1,1,1,e),n)
+<             if (if3d) call col2(convh(1,3),vzd(1,1,1,e),n)
+<             call add2col2(convh(1,eq-1),ju1,ju2,n)
+< 
+<          elseif (eq .eq. 5) then
+< 
+<             call intp_rstd(convh(1,1),u(1,1,1,eq,e),nx1,nxd,if3d,0)
+<             call add2col2(convh(1,1),ju1,ju2,n)
+<             do j=2,ndim
+<                call copy(convh(1,j),convh(1,1),n)
+<             enddo
+<             call col2(convh(1,1),vxd(1,1,1,e),n)
+<             call col2(convh(1,2),vyd(1,1,1,e),n)
+<             call col2(convh(1,3),vzd(1,1,1,e),n)
+---
+>          call col2(convh(1,1),vx(1,1,1,e),n)
+>          call col2(convh(1,2),vy(1,1,1,e),n)
+>          if (if3d) call col2(convh(1,3),vz(1,1,1,e),n)
+>          call add2col2(convh(1,eq-1),phig(1,1,1,e),pr(1,1,1,e),n)
+> 
+>       elseif (eq .eq. 5) then
+> 
+>          call add2col2 (convh(1,1),phig(1,1,1,e),pr(1,1,1,e),n)
+>          do j=2,ldim
+>             call copy(convh(1,j),convh(1,1),n)
+>          enddo
+70,74c62,70
+<          else
+<             if(nio.eq.0) write(6,*) 'eq=',eq,'really must be <= 5'
+<             if(nio.eq.0) write(6,*) 'aborting in evaluate_conv_h'
+<             call exitt
+<          endif
+---
+>          call col2(convh(1,1),vx(1,1,1,e),n)
+>          call col2(convh(1,2),vy(1,1,1,e),n)
+>          call col2(convh(1,3),vz(1,1,1,e),n)
+> 
+>       else
+> 
+>          if(nio.eq.0) write(6,*) 'eq=',eq,'really must be <= 5'
+>          if(nio.eq.0) write(6,*) 'aborting in evaluate_conv_h'
+>          call exitt
+213d208
+<       parameter (ldg=lxd**3,lwkd=2*ldg)
+215,218d209
+<       real ju
+<       common /dgrad/ d(ldg),dt(ldg),dg(ldg),dgt(ldg),jgl(ldg),jgt(ldg)
+<      $             , wkd(lwkd)
+<       real jgl,jgt
+222,223c213
+<       call get_dgl_ptr(ip,nxd,nxd) ! fills dg, dgt
+<       mdm1=nxd-1
+---
+>       call rzero(ud,nxyz)
+225,229c215,216
+<       call rzero(ur,nrstd)
+<       call rzero(us,nrstd)
+<       call rzero(ut,nrstd)
+<       call rzero(ud,nrstd)
+<       call rzero(tu,nrstd)
+---
+>       do j=1,ndim ! stride :(
+>          call gradl_rst(ur,us,ut,totalh(1,j),lx1,if3d) ! navier1
+231,248c218,226
+<       j0=0
+<       do j=1,ndim
+<          j0=j0+1
+<          call add2col2(ur,totalh(1,j),rx(1,j0,e),nrstd)
+<       enddo
+<       do j=1,ndim
+<          j0=j0+1
+<          call add2col2(us,totalh(1,j),rx(1,j0,e),nrstd)
+<       enddo
+<       if (if3d) then
+<          do j=1,ndim
+<             j0=j0+1
+<             call add2col2(ut,totalh(1,j),rx(1,j0,e),nrstd)
+<          enddo
+<          call local_grad3_t(ud,ur,us,ut,mdm1,1,dg(ip),dgt(ip),wkd)
+<       else
+<          call local_grad2_t(ud,ur,us,   mdm1,1,dg(ip),dgt(ip),wkd)
+<       endif
+---
+>          if (if3d) then
+>             j0=j+0
+>             j3=j+3
+>             j6=j+6
+>             do i=1,nrstd   ! rx has mass matrix and Jacobian on fine mesh
+>                ud(i)=ud(i)
+>      $              +rx(i,j0,e)*ur(i)+rx(i,j3,e)*us(i)+rx(i,j6,e)*ut(i)
+> !    $     +rxgll(i,j0,e)*ur(i)+rxgll(i,j3,e)*us(i)+rxgll(i,j6,e)*ut(i)
+>             enddo
+250c228,239
+<       call intp_rstd(tu,ud,nx1,nxd,if3d,1)
+---
+>          else
+> 
+>             j0=j+0
+>             j2=j+2
+>             do i=1,nrstd   ! rx has mass matrix and Jacobian on fine mesh
+>                ud(i)=ud(i)
+>      $              +rx(i,j0,e)*ur(i)+rx(i,j2,e)*us(i)
+> !    $     +rxgll(i,j0,e)*ur(i)+rxgll(i,j3,e)*us(i)+rxgll(i,j6,e)*ut(i)
+>             enddo
+>          endif
+>       enddo
+>       call col2(ud,jacmi(1,e),nxyz)
+254,257c243,244
+< !     call col2(ud,bm1(1,1,1,e),nxyz)  ! res = B*res  --- B=mass matrix
+< !     call add2(res1(1,1,1,e,eq),tu,nxyz)
+< ! weak?
+<       call sub2(res1(1,1,1,e,eq),tu,nxyz)
+---
+>       call col2(ud,bm1(1,1,1,e),nxyz)  ! res = B*res  --- B=mass matrix
+>       call add2(res1(1,1,1,e,eq),ud,nxyz)
+327d313
+<       include 'PARALLEL'
+329c315
+<       integer e,eg
+---
+>       integer e
+335c321
+<       eg = lglel(e)
+---
+> 
+340c326
+<                call userf(i,j,k,eg)
+---
+>                call userf(i,j,k,e)
+diff cmt/inflow_bc.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/inflow_bc.f
+7,8c7,8
+<       real faceq(nx1,nz1,2*ldim,nelt,nvar)
+<       real bcq(nx1,nz1,2*ldim,nelt,nvar)
+---
+>       real faceq(nvar,nx1,nz1,2*ldim,nelt) 
+>       real bcq(nvar,nx1,nz1,2*ldim,nelt) 
+24,25d23
+<       include 'DG'
+<       include 'PERFECTGAS'
+27c25
+<       integer f,e,fdim ! intent(in)
+---
+>       integer f,e ! intent(in)
+29,30c27,28
+<       real faceq(nx1*nz1,2*ldim,nelt,nvar) ! intent(in)
+<       real bcq  (nx1*nz1,2*ldim,nelt,nvar)   ! intent(out)
+---
+>       real faceq(nvar,nx1*nz1,2*ldim,nelt) ! intent(in)
+>       real bcq(nvar,nx1*nz1,2*ldim,nelt)   ! intent(out)
+32,44c30,31
+<       real snx,sny,snz,rhou,rhov,rhow,pl,rhob,rhoub,rhovb,rhowb
+<      >     ,rhoeb, mach
+<       parameter (lfd1=lxd*lzd,lfc1=lx1*lz1)
+<       common /SCRNS/ nxf(lfd1),nyf(lfd1),nzf(lfd1),fs(lfd1),
+<      >               ufacel(lfd1,5),plc(lfc1),ufacer(lfd1,5),prc(lfd1),
+<      >               flx(lfd1,5),plf(lfd1),prf(lfd1),jaco_c(lfc1),
+<      >               jaco_f(lfd1)
+<       real nxf,nyf,nzf,fs,ufacel,ufacer,plc,prc,plf,prf,jaco_c,jaco_f
+< 
+<       real phirc(lfc1),phirf(lfd1),molmrf(lfd1),molmrc(lfc1),cvgrc(lfc1)
+<       real cvgrf(lfd1),cpgrc(lfc1),cpgrf(lfd1),p0inrc(lfc1),p0inrf(lfd1)
+<      >     ,t0inrc(lfc1),t0inrf(lfd1),uxrf(lfd1),uyrf(lfd1),uzrf(lfd1)
+<      >     ,csndrf(lfd1),philf(lfd1)
+---
+>       real nx,ny,nz,rl,ul,vl,wl,pl,rr,ur,vr,wr,prf,flx(5),fs
+>       real ptot,ttot,mach
+47,48d33
+<       nxzd=nxd*nzd
+<       fdim=ndim-1
+57,99c42
+<          call userbc (ix,iy,iz,f,ieg) ! get molarmass asnd phi t0in p0in cp cv
+< c                                     !     ux,uy,uz
+<          l=l+1
+<          phirc(l) = phi
+<          molmrc(l) = molarmass
+<          cpgrc(l)=cp
+<          cvgrc(l)=cv
+<          p0inrc(l) = p0in
+<          t0inrc(l) = t0in
+<          bcq(l,f,e,iux)  = ux
+<          bcq(l,f,e,iuy)  = uy
+<          bcq(l,f,e,iuz)  = uz
+<          bcq(l,f,e,isnd) = asnd
+< 
+<       enddo
+<       enddo
+<       enddo
+< 
+<       call map_faced(cpgrf,cpgrc,nx1,nxd,fdim,0)
+<       call map_faced(cvgrf,cvgrc,nx1,nxd,fdim,0)
+<       call map_faced(molmrf,molmrc,nx1,nxd,fdim,0)
+<       call map_faced(p0inrf,p0inrc,nx1,nxd,fdim,0)
+<       call map_faced(t0inrf,t0inrc,nx1,nxd,fdim,0)
+<       call map_faced(phirf,phirc,nx1,nxd,fdim,0)
+< 
+<       call map_faced(nxf,unx(1,1,f,e),nx1,nxd,fdim,0)
+<       call map_faced(nyf,uny(1,1,f,e),nx1,nxd,fdim,0)
+<       call map_faced(nzf,unz(1,1,f,e),nx1,nxd,fdim,0)
+< 
+<       call map_faced(ufacel(1,1),faceq(1,f,e,iu1),nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,2),faceq(1,f,e,iu2),nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,3),faceq(1,f,e,iu3),nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,4),faceq(1,f,e,iu4),nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,5),faceq(1,f,e,iu5),nx1,nxd,fdim,0)
+< 
+<       call map_faced(philf,faceq(1,f,e,iph),nx1,nxd,fdim,0)
+< 
+<       call map_faced(uxrf,bcq(1,f,e,iux), nx1,nxd,fdim,0)
+<       call map_faced(uyrf,bcq(1,f,e,iuy), nx1,nxd,fdim,0)
+<       call map_faced(uzrf,bcq(1,f,e,iuz), nx1,nxd,fdim,0)
+<       call map_faced(csndrf,bcq(1,f,e,isnd), nx1,nxd,fdim,0)
+< 
+<       do l=1,lfd1
+---
+>          call userbc (ix,iy,iz,f,ieg)
+101,114c44,52
+<          snx  = nxf(l)
+<          sny  = nyf(l)
+<          snz  = nzf(l)
+< 
+<          rho  = ufacel(l,1)/philf(l) 
+<          rhou = ufacel(l,2)/philf(l)
+<          rhov = ufacel(l,3)/philf(l)
+<          rhow = ufacel(l,4)/philf(l)
+<          rhoe = ufacel(l,5)/philf(l)
+< 
+<          ux   = uxrf(l) 
+<          uy   = uyrf(l)
+<          uz   = uzrf(l)
+<          asnd = csndrf(l)
+---
+>          l=l+1
+>          nx = unx(l,1,f,e)
+>          ny = uny(l,1,f,e)
+>          nz = unz(l,1,f,e)
+>          phl= faceq(iph,l,f,e)
+>          rl = faceq(iu1,l,f,e)/phl
+>          rul= faceq(iu2,l,f,e)/phl
+>          rvl= faceq(iu3,l,f,e)/phl
+>          rwl= faceq(iu4,l,f,e)/phl
+118,137c56,83
+<          if (ldim.eq.3) betav = atan2(uz,ux)
+<          if (ldim.eq.2) betav = atan2(0.0,ux)
+< 
+<          call BcondInflowPerf(bcOptType,0,p0inrf(l),t0inrf(l)
+<      >                       ,betah,betav,mach,snx,sny,snz,cpgrf(l)
+<      >                       ,molmrf(l),rho,rhou,rhov,rhow,rhob,rhoub
+<      >                       ,rhovb,rhowb,rhoeb,pres)
+<          
+<          ufacer(l,1) = rhob*phirf(l)
+<          ufacer(l,2) = rhoub*phirf(l)
+<          ufacer(l,3) = rhovb*phirf(l)
+<          ufacer(l,4) = rhowb*phirf(l)
+<          ufacer(l,5) = rhoeb*phirf(l)
+<          prf(l)      = pres*phirf(l)
+<       enddo
+<       call invcol3(jaco_c,area(1,1,f,e),wghtc,nxz)
+<       call map_faced(jaco_f,jaco_c,nx1,nxd,fdim,0) 
+<       call col2(jaco_f,wghtf,nxzd)
+<       call rzero(fs,nxzd)
+< 
+---
+>          betav = atan2(uz,ux)
+> ! belongs in userbc somehow
+>          call BcondInflowPerf(bcOptType,0,p0in,t0in,betah,
+>      >                        betav,mach,nx,ny,nz,cp,molarmass,rl,rul,
+>      >                        rvl,rwl,rr,rur,rvr,rwr,rer,pres)
+>          bcq(irho,l,f,e) = rr     ! lol aliased
+> !        bcq(iux, l,f,e) = rur/rr ! lol aliased
+> !        bcq(iuy, l,f,e) = rvr/rr ! lol aliased
+> !        bcq(iuz, l,f,e) = rwr/rr ! lol aliased
+>          bcq(iux, l,f,e) = ux
+>          bcq(iuy, l,f,e) = uy
+>          bcq(iuz, l,f,e) = uz
+>          bcq(ipr, l,f,e) = pres ! BcondInflowPerf
+>          bcq(ithm,l,f,e) = temp ! userbc
+>          bcq(isnd,l,f,e) = asnd ! userbc
+>          bcq(iph, l,f,e) = phi  ! userbc
+>          bcq(icvf,l,f,e) = cv   ! userbc
+>          bcq(icpf,l,f,e) = cp   ! userbc
+>          bcq(iu1, l,f,e) = phi*rr  ! still aliased
+>          bcq(iu2, l,f,e) = phi*rur ! still aliased
+>          bcq(iu3, l,f,e) = phi*rvr ! still aliased
+>          bcq(iu4, l,f,e) = phi*rwr ! still aliased
+>          bcq(iu5, l,f,e) = phi*rer ! still aliased
+> !-----------------------------------------------------------------------
+> ! JH031615 OK fine we need more face storage for gas props, and
+> !          compute_gas_props_face needs output arguments of some kind
+>          fs = 0.0 ! moving grid stuff later or never
+> ! JH030915 rewrite the above to use compute_gas_props_face
+141,157c87,98
+< c     call CentralInviscid_FluxFunction(nxzd,nxf,nyf,nzf,fs,ufacel,plf,
+< c    >                                  ufacer,prf,flx)
+< c MS010716 This central flux call is trivial. Flux computation is based 
+< c solely on the right state or the ufacer array. 
+< c This is the most stable way of incorporating
+< c inflow boundary codntion (so far!). This was tested for 
+< c  ---  uniform flow and subsonic flow over a cylinder. 
+< c  (Need to test supersonic uniform flow !)
+< c Recall that ST had mentioned that he uses something like this in his 
+< c code. Also note that this change was important for inflow BC
+< c Outflow BC is not sensitive to method used to compute the flux. 
+<       call CentralInviscid_FluxFunction(nxzd,nxf,nyf,nzf,fs,ufacer,prf,
+<      >                                  ufacer,prf,flx)
+< 
+<       do ieq=1,toteq
+<          call col2(flx(1,ieq),jaco_f,nxzd)
+<          call map_faced(flux1(1,f,e,ieq),flx(1,ieq),nx1,nxd,fdim,1)
+---
+>          pl=faceq(iph,l,f,e)*faceq(ipr,l,f,e) ! needs phi. U has phi
+>          pres=phi*pres ! needs phi. U in bcq has phi already
+>          call CentralInviscid_FluxFunction(nx,ny,nz,fs,
+>      >                                     faceq(iu1,l,f,e),pl,! U-
+>      >                                     bcq(iu1,l,f,e),pres,! U+,bc
+>      >                                     flx)
+>          do j=1,5
+>             flux1(l,f,e,j)=flx(j) ! this one has phi in it already
+>          enddo
+> 
+>       enddo
+>       enddo
+251c192
+< ! $Id: BcondInflowPerf.F90,v 1.1.1.1 2014/05/05 21:47:47 tmish Exp $
+---
+> ! $Id: inflow_bc.f,v 1.1.1.1 2016/01/20 22:32:09 tbanerjee Exp $
+400c341,344
+< ! $Log: BcondInflowPerf.F90,v $
+---
+> ! $Log: inflow_bc.f,v $
+> ! Revision 1.1.1.1  2016/01/20 22:32:09  tbanerjee
+> ! - Initial version of nek5000
+> !
+diff cmt/intpdiff.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/intpdiff.f
+77c77
+<       subroutine set_dealias_face
+---
+>       subroutine set_rxgll
+80c80
+< ! JH111815 needed for face Jacobian and surface integrals
+---
+> ! JH091015 legacy. minimizes changes to flux_div from the bad old days
+84,85c84,85
+<       include 'INPUT' ! for if3d
+<       include 'GEOM'  ! for ifgeom
+---
+>       include 'INPUT'
+>       include 'GEOM'
+87,88c87,89
+<       include 'WZ'    ! for wxm1
+<       include 'DG'    ! for facewz
+---
+>       include 'CMTDATA'
+>       include 'WZ'
+>       integer e
+98c99,100
+<       call zwgl(zptf,wgtf,nxd)
+---
+>       nxyz1 = nx1*ny1*nz1
+>       nxyzd = nxd*nyd*nzd
+101,113c103,112
+<          k=0
+<          do j=1,ny1
+<          do i=1,nx1
+<             k=k+1
+<             wghtc(k)=wxm1(i)*wzm1(j)
+<          enddo
+<          enddo
+<          k=0
+<          do j=1,nyd
+<          do i=1,nxd
+<             k=k+1
+<             wghtf(k)=wgtf(i)*wgtf(j)
+<          enddo
+---
+>          do e=1,nelt
+>             call copy(rx(1,1,e),rxm1(1,1,1,e),nxyz1)
+>             call copy(rx(1,2,e),rym1(1,1,1,e),nxyz1)
+>             call copy(rx(1,3,e),rzm1(1,1,1,e),nxyz1)
+>             call copy(rx(1,4,e),sxm1(1,1,1,e),nxyz1)
+>             call copy(rx(1,5,e),sym1(1,1,1,e),nxyz1)
+>             call copy(rx(1,6,e),szm1(1,1,1,e),nxyz1)
+>             call copy(rx(1,7,e),txm1(1,1,1,e),nxyz1)
+>             call copy(rx(1,8,e),tym1(1,1,1,e),nxyz1)
+>             call copy(rx(1,9,e),tzm1(1,1,1,e),nxyz1)
+116,117c115,120
+<          call copy(wghtc,wxm1,nx1)
+<          call copy(wghtf,wgtf,nxd)
+---
+>          do e=1,nelt
+>             call copy(rx(1,1,e),rxm1(1,1,1,e),nxyz1)
+>             call copy(rx(1,2,e),rym1(1,1,1,e),nxyz1)
+>             call copy(rx(1,3,e),sxm1(1,1,1,e),nxyz1)
+>             call copy(rx(1,4,e),sym1(1,1,1,e),nxyz1)
+>          enddo
+diff cmt/MixtPerf.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/MixtPerf.f
+64c64
+< ! $Id: MixtPerf.f,v 1.5 2015/07/17 15:58:14 mrugeshs Exp $
+---
+> ! $Id: MixtPerf.f,v 1.1.1.1 2016/01/20 22:32:09 tbanerjee Exp $
+318a319,321
+> ! Revision 1.1.1.1  2016/01/20 22:32:09  tbanerjee
+> ! - Initial version of nek5000
+> !
+diff cmt/outflow_bc.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/outflow_bc.f
+2c2
+<       subroutine outflow(nvar,f,e,faceq,bcq,flux) ! don't really need nvar anymore
+---
+>       subroutine outflow(nvar,f,e,faceq,bcq,flux)
+7,8c7,8
+<       real faceq(nx1,nz1,2*ldim,nelt,nvar)
+<       real bcq(nx1,nz1,2*ldim,nelt,nvar)
+---
+>       real faceq(nvar,nx1,nz1,2*ldim,nelt)
+>       real bcq(nvar,nx1,nz1,2*ldim,nelt)
+26,27d25
+<       include 'DG'
+< 
+29,31c27,29
+<       integer  f,e,fdim
+<       real faceq(nx1*nz1,2*ldim,nelt,nvar)
+<       real bcq(nx1*nz1,2*ldim,nelt,nvar)
+---
+>       integer  f,e
+>       real faceq(nvar,nx1*nz1,2*ldim,nelt)
+>       real bcq(nvar,nx1*nz1,2*ldim,nelt)
+33,41c31
+<       real sxn,syn,szn,rhou,rhov,rhow,pl,rhob,rhoub,rhovb,rhowb,rhoeb
+<       parameter (lfd1=lxd*lzd,lfc1=lx1*lz1)
+<       common /SCRNS/ nxf(lfd1),nyf(lfd1),nzf(lfd1),fs(lfd1),
+<      >               ufacel(lfd1,5),plc(lfc1),ufacer(lfd1,5),prc(lfc1),
+<      >               flx(lfd1,5),plf(lfd1),prf(lfd1),jaco_c(lfc1),
+<      >               jaco_f(lfd1)
+<       real nxf,nyf,nzf,fs,ufacel,ufacer,plc,prc,plf,prf,jaco_c,jaco_f
+<       real philc(lfc1),philf(lfd1),molmlf(lfd1),molmlc(lfc1),cvglc(lfc1)
+<       real cvglf(lfd1),cpglc(lfc1),cpglf(lfd1)
+---
+>       real sxn,syn,szn,rl,ul,vl,wl,pl,rr,ur,vr,wr,pr,flx(5),fs
+44,45d33
+<       nxzd=nxd*nzd
+<       fdim=ndim-1
+59,68c47,54
+<          philc(l) = phi
+<          molmlc(l) = molarmass
+<          rhou= faceq(l,f,e,iu2)/phi
+<          rhov= faceq(l,f,e,iu3)/phi
+<          rhow= faceq(l,f,e,iu4)/phi
+<          rhoe= faceq(l,f,e,iu5)/phi
+<          plc(l)= faceq(l,f,e,ipr)
+<          cpglc(l)=faceq(l,f,e,icpf)/rho
+<          cvglc(l)=faceq(l,f,e,icvf)/rho
+< c        fs = 0.0
+---
+>          rhou= faceq(iu2,l,f,e)/phi
+>          rhov= faceq(iu3,l,f,e)/phi
+>          rhow= faceq(iu4,l,f,e)/phi
+>          rhoe= faceq(iu5,l,f,e)/phi
+>          pl  = faceq(ipr,l,f,e)
+>          cpgas=faceq(icpf,l,f,e)/rho
+>          cvgas=faceq(icvf,l,f,e)/rho
+>          fs = 0.0
+72c58
+<             pres= plc(l)
+---
+>             pres= pl
+74,75c60,61
+<          call BcondOutflowPerf(1,pres,sxn,syn,szn,cpglc(l),molmlc(l),
+<      >                         rho,rhou,rhov,rhow,rhoe,plc(l),
+---
+>          call BcondOutflowPerf(1,pres,sxn,syn,szn,cpgas,molarmass,
+>      >                         rho,rhou,rhov,rhow,rhoe,pl,
+77,80c63,66
+<          bcq(l,f,e,irho)=rhob
+<          bcq(l,f,e,iux)=rhoub/rhob
+<          bcq(l,f,e,iuy)=rhovb/rhob
+<          bcq(l,f,e,iuz)=rhowb/rhob
+---
+>          bcq(irho,l,f,e)=rhob
+>          bcq(iux, l,f,e)=rhoub/rhob
+>          bcq(iuy, l,f,e)=rhovb/rhob
+>          bcq(iuz, l,f,e)=rhowb/rhob
+82,83c68,69
+<          bcq(l,f,e,ithm)=(rhoeb-0.5*(rhoub**2+rhovb**2+rhowb**2)/rhob)/
+<      >                   cvglc(l)
+---
+>          bcq(ithm,l,f,e)=(rhoeb-0.5*(rhoub**2+rhovb**2+rhowb**2)/rhob)/
+>      >                   cvgas
+85,95c71,87
+<          bcq(l,f,e,iu1)=rhob*phi
+<          bcq(l,f,e,iu2)=rhoub*phi
+<          bcq(l,f,e,iu3)=rhovb*phi
+<          bcq(l,f,e,iu4)=rhowb*phi
+<          bcq(l,f,e,iu5)=rhoeb*phi
+<          bcq(l,f,e,iph)=phi
+<          bcq(l,f,e,ipr)=pres
+<          plc(l)=plc(l)*phi
+<          prc(l)=phi*pres ! needs phi. U in bcq has phi already
+< c        write(27,*)bcq(l,f,e,iu1),bcq(l,f,e,iu2),bcq(l,f,e,iu5)
+< c        write(28,*)faceq(l,f,e,iu1),faceq(l,f,e,iu2),faceq(l,f,e,iu5)
+---
+>          bcq(iu1, l,f,e)=rhob*phi
+>          bcq(iu2, l,f,e)=rhoub*phi
+>          bcq(iu3, l,f,e)=rhovb*phi
+>          bcq(iu4, l,f,e)=rhowb*phi
+>          bcq(iu5, l,f,e)=rhoeb*phi
+>          bcq(iph, l,f,e)=phi
+>          bcq(ipr, l,f,e)=pres
+>          fs=0.0
+>          pl=pl*phi
+>          pres=pres*phi
+>          call CentralInviscid_FluxFunction(sxn,syn,szn,fs,
+>      >                                     faceq(iu1,l,f,e),pl,! U-
+>      >                                     bcq(iu1,l,f,e),pres,! U+,bc
+>      >                                     flx)
+>          do j=1,5
+>             flux1(l,f,e,j)=flx(j)
+>          enddo
+100,175d91
+<       call map_faced(nxf,unx(1,1,f,e),nx1,nxd,fdim,0)
+<       call map_faced(nyf,uny(1,1,f,e),nx1,nxd,fdim,0)
+<       call map_faced(nzf,unz(1,1,f,e),nx1,nxd,fdim,0)
+<       call map_faced(plf,plc,nx1,nxd,fdim,0)
+<       call map_faced(prf,prc,nx1,nxd,fdim,0)
+<       call map_faced(philf,philc,nx1,nxd,fdim,0)
+< c     call map_faced(cvglf,cvglc,nx1,nxd,fdim,0)
+<       call map_faced(cpglf,cpglc,nx1,nxd,fdim,0)
+<       call map_faced(molmlf,molmlc,nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,1),faceq(1,f,e,iu1),nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,2),faceq(1,f,e,iu2),nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,3),faceq(1,f,e,iu3),nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,4),faceq(1,f,e,iu4),nx1,nxd,fdim,0)
+<       call map_faced(ufacel(1,5),faceq(1,f,e,iu5),nx1,nxd,fdim,0)
+<       call map_faced(ufacer(1,1),bcq(1,f,e,iu1),  nx1,nxd,fdim,0)
+<       call map_faced(ufacer(1,2),bcq(1,f,e,iu2),  nx1,nxd,fdim,0)
+<       call map_faced(ufacer(1,3),bcq(1,f,e,iu3),  nx1,nxd,fdim,0)
+<       call map_faced(ufacer(1,4),bcq(1,f,e,iu4),  nx1,nxd,fdim,0)
+<       call map_faced(ufacer(1,5),bcq(1,f,e,iu5),  nx1,nxd,fdim,0)
+< 
+<       do l=1,lfd1
+<          sxn  = nxf(l)
+<          syn  = nyf(l)
+<          szn  = nzf(l)
+<          rho  = ufacel(l,1)/philf(l) 
+<          rhou = ufacel(l,2)/philf(l)
+<          rhov = ufacel(l,3)/philf(l)
+<          rhow = ufacel(l,4)/philf(l)
+<          rhoe = ufacel(l,5)/philf(l)
+<          plf(l) = plf(l)/philf(l)
+< c        fs   = 0.0
+<          if(outflsub)then
+<             pres= pinfty
+<          else
+<             pres= plf(l)
+<          endif
+<          call BcondOutflowPerf(1,pres,sxn,syn,szn,cpglf(l),molmlf(l)
+<      >                        ,rho,rhou,rhov,rhow,rhoe,plf(l)
+<      >                        ,rhob,rhoub,rhovb,rhowb,rhoeb )
+<          ufacer(l,1) = rhob*philf(l)
+<          ufacer(l,2) = rhoub*philf(l)
+<          ufacer(l,3) = rhovb*philf(l)
+<          ufacer(l,4) = rhowb*philf(l)
+<          ufacer(l,5) = rhoeb*philf(l)
+< c        write(37,*)ufacer(l,1),ufacer(l,2),ufacer(l,5),rhoub
+< c        write(38,*)ufacel(l,1),ufacel(l,2),ufacel(l,5),rhou
+< 
+<          plf(l)      = plf(l)*philf(l)
+<          prf(l)      = pres*philf(l)
+< c           write(26,*)'pinfty, ', pinfty, 'pres ', pres
+<       enddo
+<       call invcol3(jaco_c,area(1,1,f,e),wghtc,nxz)
+<       call map_faced(jaco_f,jaco_c,nx1,nxd,fdim,0) 
+<       call col2(jaco_f,wghtf,nxzd)
+<       call rzero(fs,nxzd)
+< 
+< !-----------------------------------------------------------------------
+< ! Inviscid flux at inflow can probably just be hardcoded instead of
+< ! derived from a trivial call of CentralInviscid_FluxFunction
+< c     call CentralInviscid_FluxFunction(nxzd,nxf,nyf,nzf,fs,ufacel,plf,
+< c    >                                  ufacer,prf,flx)
+< c MS010716 This central flux call is trivial. Flux computation is based 
+< c solely on the right state or the ufacer array. 
+< c Note that this change was important for inflow BC.
+< c Outflow BC is not sensitive to method used to compute the flux. 
+< c This was tested for 
+< c  ---  uniform flow and subsonic flow over a cylinder. 
+< c  (Need to test supersonic uniform flow !)
+<       call CentralInviscid_FluxFunction(nxzd,nxf,nyf,nzf,fs,ufacer,prf,
+<      >                                  ufacer,prf,flx)
+< 
+<       do ieq=1,toteq
+<          call col2(flx(1,ieq),jaco_f,nxzd)
+<          call map_faced(flux1(1,f,e,ieq),flx(1,ieq),nx1,nxd,fdim,1)
+<       enddo
+< 
+209c125
+< ! $Id: BcondOutflowPerf.F90,v 1.1.1.1 2014/05/05 21:47:47 tmish Exp $
+---
+> ! $Id: outflow_bc.f,v 1.1.1.1 2016/01/20 22:32:09 tbanerjee Exp $
+295c211,214
+< ! $Log: BcondOutflowPerf.F90,v $
+---
+> ! $Log: outflow_bc.f,v $
+> ! Revision 1.1.1.1  2016/01/20 22:32:09  tbanerjee
+> ! - Initial version of nek5000
+> !
+diff cmt/surface_fluxes.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/surface_fluxes.f
+26a27
+>       ntot1 = nfq*nstate
+56a58,65
+> ! JH091614 Since we don't have a correctly vectorized gs_op_fields here,
+> !          I have decided to transpose the q's to get primitive vars
+> !          ordered innermost.
+>       call transpose(fatface(iflx),nstate,fatface(iqm),nfq)
+>       call copy(fatface(iqm),fatface(iflx),ntot1)
+>       call transpose(fatface(iflx),nstate,fatface(iqp),nfq)
+>       call copy(fatface(iqp),fatface(iflx),ntot1)
+> 
+102a112,113
+> !        qminus(ivar,i)=yourface(i,1,1,1) ! gs_op_fields no worky yet.
+>                                           ! tranpose later
+130a142
+> !     write(6,*) 'face_state_commo ',nstate
+160,162c172,174
+<       include 'INPUT' ! do we need this?
+<       include 'GEOM' ! for unx
+<       include 'CMTDATA' ! do we need this without outflsub?
+---
+>       include 'INPUT'
+>       include 'GEOM'
+>       include 'CMTDATA'
+163a176,180
+> ! ******************************************************************************
+> ! Definitions and declarations
+> ! ******************************************************************************
+>       real MixtPerf_Ho_CpTUVW
+>       external MixtPerf_Ho_CpTUVW
+169,170c186,187
+<       real qminus(nx1*nz1,2*ndim,nelt,nstate),
+<      >     qplus(nx1*nz1,2*ndim,nelt,nstate),
+---
+>       real qminus(nstate,nx1*nz1,2*ndim,nelt),
+>      >     qplus(nstate,nx1*nz1,2*ndim,nelt),
+177,210c194,197
+<       integer e,f,fdim,i,k,nxz,nface,ifield
+<       parameter (lfd=lxd*lzd)
+< ! JH111815 legacy rocflu names.
+< !
+< ! nx,ny,nz : outward facing unit normal components
+< ! fs       : face speed. zero until we have moving grid
+< ! jaco_c   : fdim-D GLL grid Jacobian
+< ! nm       : jaco_c, fine grid
+< !
+< ! State on the interior (-, "left") side of the face
+< ! rl       : density
+< ! ul,vl,wl : velocity
+< ! tl       : temperature
+< ! al       : sound speed
+< ! pl       : pressure, then phi
+< ! cpl      : rho*cp
+< ! State on the exterior (+, "right") side of the face
+< ! rr       : density
+< ! ur,vr,wr : velocity
+< ! tr       : temperature
+< ! ar       : sound speed
+< ! pr       : pressure
+< ! cpr      : rho*cp
+< 
+<       COMMON /SCRNS/ nx(lfd), ny(lfd), nz(lfd), rl(lfd), ul(lfd),
+<      >               vl(lfd), wl(lfd), pl(lfd), tl(lfd), al(lfd),
+<      >               cpl(lfd),rr(lfd), ur(lfd), vr(lfd), wr(lfd),
+<      >               pr(lfd),tr(lfd), ar(lfd),cpr(lfd), fs(lfd),
+<      >               jaco_f(lfd),flx(lfd,toteq),jaco_c(lx1*lz1)
+<       real nx, ny, nz, rl, ul, vl, wl, pl, tl, al, cpl, rr, ur, vr, wr,
+<      >                pr,tr, ar,cpr, fs,jaco_f,flx,jaco_c
+< 
+< !     REAL vf(3)
+<       real nTol
+---
+>       integer e,f,i,k,nxz,nface,ivoid,ifield
+>       REAL al,ar,cpl,cpr,dx,dy,dz,fs,fsu,gcl,gcr,gl,gr,Hl,Hr,irl,irr,
+>      >      nm,nTol,nx,ny,nz,pl,pr,rl,rr,tl,tr,ul,ur,vl,vr,wl,wr,rgl,rgr
+>       REAL flx(5),vf(3)
+216d202
+<       fdim=ndim-1
+219d204
+<       nxzd  = nxd*nzd
+235,238c220,223
+<             do j=1,nstate
+<                do i=1,nxz
+<                   if (abs(qplus(i,f,e,j)) .gt. ntol) then
+<                   write(6,*) nid,j,i,qplus(i,f,e,j),qminus(i,f,e,j),cb,
+---
+>             do i=1,nxz
+>                do j=1,nstate
+>                   if (abs(qplus(j,i,f,e)) .gt. ntol) then
+>                   write(6,*) nid,j,i,qplus(j,i,f,e),qminus(j,i,f,e),cb,
+261,297c246,309
+< ! JH111715 now with dealiased surface integrals. I am too lazy to write
+< !          something better
+<             call map_faced(nx,unx(1,1,f,e),nx1,nxd,fdim,0)
+<             call map_faced(ny,uny(1,1,f,e),nx1,nxd,fdim,0)
+<             call map_faced(nz,unz(1,1,f,e),nx1,nxd,fdim,0)
+< 
+<             call map_faced(rl,qminus(1,f,e,irho),nx1,nxd,fdim,0)
+<             call map_faced(ul,qminus(1,f,e,iux),nx1,nxd,fdim,0)
+<             call map_faced(vl,qminus(1,f,e,iuy),nx1,nxd,fdim,0)
+<             call map_faced(wl,qminus(1,f,e,iuz),nx1,nxd,fdim,0)
+<             call map_faced(pl,qminus(1,f,e,ipr),nx1,nxd,fdim,0)
+<             call map_faced(tl,qminus(1,f,e,ithm),nx1,nxd,fdim,0)
+<             call map_faced(al,qminus(1,f,e,isnd),nx1,nxd,fdim,0)
+<             call map_faced(cpl,qminus(1,f,e,icpf),nx1,nxd,fdim,0)
+< 
+<             call map_faced(rr,qplus(1,f,e,irho),nx1,nxd,fdim,0)
+<             call map_faced(ur,qplus(1,f,e,iux),nx1,nxd,fdim,0)
+<             call map_faced(vr,qplus(1,f,e,iuy),nx1,nxd,fdim,0)
+<             call map_faced(wr,qplus(1,f,e,iuz),nx1,nxd,fdim,0)
+<             call map_faced(pr,qplus(1,f,e,ipr),nx1,nxd,fdim,0)
+<             call map_faced(tr,qplus(1,f,e,ithm),nx1,nxd,fdim,0)
+<             call map_faced(ar,qplus(1,f,e,isnd),nx1,nxd,fdim,0)
+<             call map_faced(cpr,qplus(1,f,e,icpf),nx1,nxd,fdim,0)
+< 
+<             call invcol3(jaco_c,area(1,1,f,e),wghtc,nxz)
+<             call map_faced(jaco_f,jaco_c,nx1,nxd,fdim,0) 
+<             call col2(jaco_f,wghtf,nxzd)
+<             call rzero(fs,nxzd) ! moving grid stuff later
+< 
+<             call AUSM_FluxFunction(nxzd,nx,ny,nz,jaco_f,fs,rl,ul,vl,wl,
+<      >                        pl,al,tl,rr,ur,vr,wr,pr,ar,tr,flx,cpl,cpr)
+< 
+<             call map_faced(pl,qminus(1,f,e,iph),nx1,nxd,fdim,0)
+<             do j=1,toteq
+<                call col2(flx(1,j),pl,nxzd)
+<                call map_faced(flux(1,f,e,j),flx(1,j),nx1,nxd,fdim,1)
+<             enddo
+---
+> ! ******************************************************************************
+> ! Compute fluxes through interior faces
+> ! ******************************************************************************
+> 
+>             do i=1,nxz
+>                do j=1,5
+>                   flux(i,f,e,j)=0.0
+>                enddo
+> 
+> ! ==============================================================================
+> !   Get face geometry and, when it exists, grid speed
+> ! ==============================================================================
+> 
+>                nx = unx(i,1,f,e)
+>                ny = uny(i,1,f,e)
+>                nz = unz(i,1,f,e)
+>                nm = 1.0 ! multiply by area(i,1,f,e) later
+> 
+> !              fs = pGrid%gs(indGs*ifg) ! face speed
+>                fs = 0.0 ! moving grid stuff later
+> 
+> ! ==============================================================================
+> !   Compute left and right states
+> ! ==============================================================================
+> 
+> ! ------------------------------------------------------------------------------
+> !   Left state
+> ! ------------------------------------------------------------------------------
+> 
+>                rl = qminus(irho,i,f,e)
+>                ul = qminus(iux,i,f,e)
+>                vl = qminus(iuy,i,f,e)
+>                wl = qminus(iuz,i,f,e)
+>                pl = qminus(ipr,i,f,e)
+>                tl = qminus(ithm,i,f,e)
+>                al = qminus(isnd,i,f,e)
+>                cpl= qminus(icpf,i,f,e)/rl
+>                Hl = MixtPerf_Ho_CpTUVW(cpl,tl,ul,vl,wl)
+> 
+> ! ------------------------------------------------------------------------------
+> !   Right state
+> ! ------------------------------------------------------------------------------
+> 
+>                rr = qplus(irho,i,f,e)
+>                ur = qplus(iux,i,f,e)
+>                vr = qplus(iuy,i,f,e)
+>                wr = qplus(iuz,i,f,e)
+>                pr = qplus(ipr,i,f,e)
+>                tr = qplus(ithm,i,f,e)
+>                ar = qplus(isnd,i,f,e)
+>                cpr= qplus(icpf,i,f,e)/rr
+>                Hr = MixtPerf_Ho_CpTUVW(cpr,tr,ur,vr,wr)
+> 
+> ! ==============================================================================
+> !   Compute fluxes
+> ! ==============================================================================
+> 
+>                call AUSM_FluxFunction(nx,ny,nz,nm,fs,rl,ul,vl,wl,pl,Hl,
+>      >                                   al,rr,ur,vr,wr,pr,Hr,ar,flx,vf)
+>                do j=1,5
+>                   flux(i,f,e,j)=flx(j) ! put phi here soon
+>                enddo
+> 
+>             enddo ! i=1,nxz
+317,321c329,351
+< ! weak form until we get the time loop rewritten
+< !     onem=-1.0
+< !     ntot=nx1*nz1*2*ndim*nelt
+< !     call cmult(flux,onem,ntot)
+< ! weak form until we get the time loop rewritten
+---
+>       nxz=nx1*nz1
+>       nface=2*ldim
+>       k=0
+> 
+> ! JH030915 As qminus and qplus grow and get more flexible, throttling by phig
+> !          should be done via qminus and NOT the way it is done here. We don't
+> !          need icpvars anymore, and, most importantly ViscousFlux ALREADY HAS PHI!!!!!!
+>       l = 0
+>       do e=1,nelt
+>       do f=1,nface
+>          call facind(i0,i1,j0,j1,k0,k1,nx1,ny1,nz1,f) 
+>          k = 0
+>          do iz=k0,k1
+>          do iy=j0,j1
+>          do ix=i0,i1
+>             l = l + 1
+>             k = k + 1
+>             flux(l)=flux(l)*area(k,1,f,e)*phig(ix,iy,iz,e)
+>          enddo
+>          enddo
+>          enddo
+>       enddo
+>       enddo
+327a358,404
+> 
+>       subroutine surface_integral_elm(e,eq)
+> ! JH062314 surface integrals one element at a time. Only needed because we are
+> !          doing all this in strong form
+> ! JH070214 CMTSURFLX no longer used here. it's just one element, we can afford
+> !          to store stuff that lives here only
+> ! JH091015 this routine had better vanish when we get weak form working
+>       include 'SIZE'
+>       include 'DG'
+>       include 'CMTDATA'
+>       include 'INPUT'
+>       include 'GEOM'
+> 
+>       real zenorms(lx1,lz1,6,lelt,3)
+>       equivalence (zenorms,unx)
+> 
+>       integer lfc1
+>       parameter (lfc1=lx1*lz1*2*ldim)
+>       real flux(lfc1),yrface(lfc1)
+>       integer e,eq
+>       integer f
+> 
+>       nface = 2*ndim
+>       nxz   = nx1*nz1
+> 
+>       call rzero(flux,lfc1)
+>       do j=1,ndim
+>          call full2face_cmt(1,nx1,ny1,nz1,iface_flux(1,e),yrface,
+>      >                      totalh(1,j))
+> ! -n-.H
+>          k=0
+>          do f=1,nface
+>             do i=1,nxz
+>             k=k+1
+>             flux(k) = flux(k)-area(i,1,f,e)*zenorms(i,1,f,e,j)*yrface(k)
+>             enddo
+>          enddo
+> 
+>       enddo
+> 
+>       call add_face2full_cmt(1,nx1,ny1,nz1,iface_flux(1,e),
+>      >                       res1(1,1,1,e,eq),flux)
+> 
+>       return
+>       end
+> 
+> !-----------------------------------------------------------------------
+diff cmt/wall_bc.f /home/taniabanerjee/cmtbonenew/sfbranch/cmtbone2/nek5/trunk/nek/cmt/wall_bc.f
+7,8c7,8
+<       real    faceq(nx1*nz1,2*ndim,nelt,nstate)
+<       real    bcq(nx1*nz1,2*ndim,nelt,nstate) 
+---
+>       real    faceq(nstate,nx1*nz1,2*ndim,nelt)
+>       real    bcq(nstate,nx1*nz1,2*ndim,nelt) 
+26,27d25
+<       include 'DG'
+<       include 'MASS'
+31,32c29,30
+<       real faceq(nx1*nz1,2*ndim,nelt,nvar)
+<       real bcq(nx1*nz1,2*ndim,nelt,nvar)
+---
+>       real faceq(nvar,nx1*nz1,2*ndim,nelt)
+>       real bcq(nvar,nx1*nz1,2*ndim,nelt)
+34,41c32,33
+<       integer i, nxz, fdim
+<       real nx,ny,nz,rl,ul,vl,wl,pl,fs
+<       parameter (lfd1=lxd*lzd,lfc1=lx1*lz1)
+<       common /SCRNS/ nxf(lfd1),nyf(lfd1),nzf(lfd1),fs2(lfd1),
+<      >               ufacel(lfd1,5),plc(lfc1),ufacer(lfd1,5),prc(lfd1),
+<      >               flx(lfd1,5),plf(lfd1),jaco_c(lfc1),
+<      >               jaco_f(lfd1),dumminus(lfd1,5)
+<       real nxf,nyf,nzf,ufacel,ufacer,plc,prc,plf,jaco_c,jaco_f,dumminus
+---
+>       integer i, nxz
+>       real nx,ny,nz,rl,ul,vl,wl,pl,fs,dumminus(5),flx(5)
+44,45d35
+<       nxzd=nxd*nzd
+<       fdim=ndim-1
+56,57c46
+<          call userbc (ix,iy,iz,f,ieg) ! get molarmass, phi
+< c                                     ! ux,uy,uz ifvisc
+---
+>          call userbc (ix,iy,iz,f,ieg)
+62,66c51,55
+<          rl = faceq(l,f,e,irho)
+<          ul = faceq(l,f,e,iux)
+<          vl = faceq(l,f,e,iuy)
+<          wl = faceq(l,f,e,iuz)
+<          plc(l)= faceq(l,f,e,ipr)
+---
+>          rl = faceq(irho,l,f,e)
+>          ul = faceq(iux,l,f,e)
+>          vl = faceq(iuy,l,f,e)
+>          wl = faceq(iuz,l,f,e)
+>          pl = faceq(ipr,l,f,e)
+70,81c59,65
+<      >                                      rl,ul,vl,wl,fs,plc(l))
+<          bcq(l,f,e,irho)=rl ! probably shouldn't be setting these
+<          bcq(l,f,e,iux)=ul  ! on the other hand, it ensures [[]]=0
+<          bcq(l,f,e,iuy)=vl  ! THINK!!!
+<          bcq(l,f,e,iuz)=wl
+<          bcq(l,f,e,ipr)=plc(l)! from RFLU_SetRindStateSlipWallPerf
+<          bcq(l,f,e,iph)=phi
+<          bcq(l,f,e,iu1)=faceq(l,f,e,iu1)
+<          bcq(l,f,e,iu2)=faceq(l,f,e,iu2)
+<          bcq(l,f,e,iu3)=faceq(l,f,e,iu3)
+<          bcq(l,f,e,iu4)=faceq(l,f,e,iu4)
+<          bcq(l,f,e,iu5)=faceq(l,f,e,iu5)
+---
+>      >                                      rl,ul,vl,wl,fs,pl)
+>          bcq(irho,l,f,e)=rl
+>          bcq(iux,l,f,e)=ul
+>          bcq(iuy,l,f,e)=vl
+>          bcq(iuz,l,f,e)=wl
+>          bcq(ipr,l,f,e)=pl ! from RFLU_SetRindStateSlipWallPerf
+>          bcq(iph,l,f,e)=phi
+83,86c67,70
+<             bcq(l,f,e,iux)=ux
+<             bcq(l,f,e,iuy)=uy
+<             bcq(l,f,e,iuz)=uz
+<             if (cbc(f,e,2) .eq. 'W  ') bcq(l,f,e,ithm)=temp
+---
+>             bcq(iux,l,f,e)=ux
+>             bcq(iuy,l,f,e)=uy
+>             bcq(iuz,l,f,e)=uz
+>             if (cbc(f,e,2) .eq. 'W  ') bcq(ithm,l,f,e)=temp
+88,93d71
+<          plc(l)=plc(l)*phi
+<          write(66+nid,*)'p,rl,ul,vl,wl',plc(l),rl,ul,vl,wl
+<       enddo
+<       enddo
+<       enddo
+< 
+96,108c74,84
+<       call map_faced(nxf,unx(1,1,f,e),nx1,nxd,fdim,0)
+<       call map_faced(nyf,uny(1,1,f,e),nx1,nxd,fdim,0)
+<       call map_faced(nzf,unz(1,1,f,e),nx1,nxd,fdim,0)
+<       call map_faced(plf,plc,nx1,nxd,fdim,0)
+<       call rzero(dumminus,toteq*nxzd)
+<       call map_faced(dumminus(1,1),faceq(1,f,e,iu1),nx1,nxd,fdim,0)
+<       call rzero(fs2,nxzd)
+<       call CentralInviscid_FluxFunction(nxzd,nxf,nyf,nzf,fs2,dumminus,
+<      >                                    plf,dumminus,plf,flx)
+< 
+<       do l=1,nxzd
+<          write(76+nid,*)'flx ',flx(l,1),flx(l,2)/nxf(l)
+<      >       ,flx(l,3)/nyf(l),flx(l,4)/nzf(l),flx(l,5)
+---
+>          dumminus(1)=rl
+>          dumminus(2)=0.0
+>          dumminus(3)=0.0
+>          dumminus(4)=0.0
+>          dumminus(5)=0.0
+>          call CentralInviscid_FluxFunction(nx,ny,nz,fs,dumminus,pl
+>      >                                    ,dumminus,pl,flx)
+>          do j=1,5
+>             fluxw(l,f,e,j)=flx(j)
+>          enddo
+>          if (cbc(f,e,2) .eq. 'I  ') fluxw(l,f,e,5) = flux
+110,115d85
+<       call invcol3(jaco_c,area(1,1,f,e),wghtc,nxz)
+<       call map_faced(jaco_f,jaco_c,nx1,nxd,fdim,0)
+<       call col2(jaco_f,wghtf,nxzd)
+<       do ieq=1,toteq-1
+<          call col2(flx(1,ieq),jaco_f,nxzd)
+<          call map_faced(fluxw(1,f,e,ieq),flx(1,ieq),nx1,nxd,fdim,1)
+117,122d86
+< 
+<       if (cbc(f,e,2).ne.'I  ') call map_faced(fluxw(1,f,e,toteq),
+<      >                              flx(1,toteq),nx1,nxd,fdim,1)
+<       do l=1,nxz
+<          write(86+nid,*)'fluxw ',fluxw(l,f,e,1),fluxw(l,f,e,2)
+<      >       ,fluxw(l,f,e,3),fluxw(l,f,e,4),fluxw(l,f,e,5)
+123a88
+> 
+134c99
+< !              Not sure if low-order reconstruction lurks here.
+---
+> !

@@ -1,0 +1,326 @@
+!----------------------------------------------------------------------------------
+      subroutine surface_integral_full_gpu(vol, flux)
+      use cudafor
+      include 'SIZE.cuf'
+      include 'DG.cuf'
+      include 'GEOM.cuf'
+      include 'CMTDATA.cuf'
+
+      real vol(lx1*ly1*lz1*lelt,toteq),flux(lelt*lx1*lz1*2*ldim*toteq)
+      !real vol(lx1*ly1*lz1*lelt,toteq),flux(lx1*lz1*2*ldim*toteq)
+      real, device :: d_vol(lx1*ly1*lz1*lelt,toteq)
+      real, device :: d_flux(lelt*lx1*lz1*2*ldim*toteq)
+      real, device :: d_area(lelt*6*lx1*lz1)
+      real, device :: d_phig(lx1*ly1*lz1*lelt)
+      real, device :: d_iface_flux(lelt*6*lx1*nz1)
+      nface = 2 * ldim
+      istate = cudaMemcpy(d_flux,flux,lelt*lx1*lz1*2*ldim*toteq,cudaMemcpyHosttoDevice)
+      istate = cudaMemcpy(d_area,area,lelt*nface*lx1*lz1,cudaMemcpyHosttoDevice)
+      istate = cudaMemcpy(d_phig,phig,lx1*ly1*lz1*lelt, cudaMemcpyHosttoDevice)
+      istate = cudaMemcpy(d_iface_flux,iface_flux,lelt*nface*lx1*lz1,cudaMemcpyHosttoDevice)
+
+      call surfaceintegralwrapper(d_flux, d_area , d_phig, d_vol, d_iface_flux,toteq,nx1,ny1,nz1,nelt, nface);
+
+      vol = d_vol
+      flux = d_flux
+
+      return
+      end
+
+
+
+      subroutine fillq_gpu(f1, f2, f3, f4, f5, qminus, d_iface_flux)
+      include 'SIZE.cuf'
+      include 'DG.cuf'
+      integer ivar! intent(in)
+!      real f1(nx1,ny1,nz1,nelt)! intent(in)
+!      real f2(nx1,ny1,nz1,nelt)!
+!      real f3(nx1,ny1,nz1,nelt)!
+!      real f4(nx1,ny1,nz1,nelt)!
+!      real f5(nx1,ny1,nz1,nelt)!
+!     real, intent(out)qminus(7,nx1*nz1*2*ldim*nelt) ! gs_op no worky
+!      real qminus(nx1*nz1*2*ndim*nelt,*)! intent(out)
+      integer e,f
+!      real qq(5*nelt*2*ndim*nx1*nz1)
+
+      nxz  =nx1*nz1
+      nface=2*ndim
+      n_c=nxz*nface
+
+      tbeg=dnekclock()
+      !call full2face_cmt(nelt,nx1,ny1,nz1,iface_flux,yourface,field) !- level4.f
+!      print *, nelt, nxz, nx1, ny1, nz1, iface_flux(3,1)
+      call fillqWrapper(f1,f2,f3,f4,f5, qminus, nelt, n_c, nx1*ny1*nz1, &
+                           d_iface_flux, true, false)
+!      call copyqq(qq,qminus, n_c*nelt)
+      tend=dnekclock()
+
+      return
+
+      end
+
+
+
+      subroutine faceu_gpu(eq_gpu,d_f,d_u,d_iface_flux)
+      ! get faces of conserved variables stored contiguously
+      include 'SIZE.cuf'
+      include 'CMTDATA.cuf'
+      include 'DG.cuf'
+!      real yourface(nx1,nz1,2*ldim,nelt)
+      n_c = nx1*nz1*2*ndim
+      call faceuWrapper(eq_gpu, n_c, nx1*ny1*nz1, nelt, d_u, d_f, &
+                           d_iface_flux)
+      return
+      end
+
+
+      subroutine InviscidFlux_gpu(qminus, qplus, flux,d_unx, d_uny, &
+          d_unz, d_area, d_wghtc, d_wghtf, d_cbc, d_jgl, d_jgt,  &
+          d_all, d_jaco_c,   &
+          nstate, nflux)
+!-------------------------------------------------------------------------------
+! JH091514 A fading copy of RFLU_ModAUSM.F90 from RocFlu
+!-------------------------------------------------------------------------------
+
+!#ifdef SPEC
+!      USE ModSpecies, ONLY: t_spec_type
+!#endif
+      include 'SIZE.cuf'
+      include 'INPUT.cuf' ! do we need this?
+      include 'GEOM.cuf' ! for unx
+      include 'CMTDATA.cuf' ! do we need this without outflsub?
+      include 'DG.cuf'
+
+! ==============================================================================
+! Arguments
+! ==============================================================================
+      integer nstate,nflux
+!      real qminus(nx1*nz1,2*ndim,nelt,nstate), &
+!     >     qplus(nx1*nz1,2*ndim,nelt,nstate), &
+!     >     flux(nx1*nz1,2*ndim,nelt,nflux)
+
+! ==============================================================================
+! Locals
+! ==============================================================================
+
+      integer e,f,fdim,i,k,nxz,nface,ifield,testt
+      parameter (lfd=lxd*lzd)
+      parameter (ldg=lxd**3,lwkd=4*lxd*lxd)
+! JH111815 legacy rocflu names.
+!
+! nx,ny,nz : outward facing unit normal components
+! fs       : face speed. zero until we have moving grid
+! jaco_c   : fdim-D GLL grid Jacobian
+! nm       : jaco_c, fine grid
+!
+! State on the interior (-, "left") side of the face
+! rl       : density
+! ul,vl,wl : velocity
+! tl       : temperature
+! al       : sound speed
+! pl       : pressure, then phi
+! cpl      : rho*cp
+! State on the exterior (+, "right") side of the face
+! rr       : density
+! ur,vr,wr : velocity
+! tr       : temperature
+! ar       : sound speed
+! pr       : pressure
+! cpr      : rho*cp
+
+      COMMON /SCRNS/ nx(lfd), ny(lfd), nz(lfd), rl(lfd), ul(lfd), &
+                    vl(lfd), wl(lfd), pl(lfd), tl(lfd), al(lfd), &
+                    cpl(lfd),rr(lfd), ur(lfd), vr(lfd), wr(lfd), &
+                    pr(lfd),tr(lfd), ar(lfd),cpr(lfd), fs(lfd), &
+                    jaco_f(lfd),flx(lfd,toteq),jaco_c(lx1*lz1)
+      common /dgrad/ jgl(ldg),jgt(ldg)
+      real nx, ny, nz, rl, ul, vl, wl, pl, tl, al, cpl, rr, ur, vr, wr, &
+                     pr,tr, ar,cpr, fs,jaco_f,flx,jaco_c
+    
+
+      call get_int_ptr(i,nx1,nxd);
+
+      call InviscidFluxwrapper(qminus, qplus, flux,d_unx, d_uny, &
+          d_unz, d_area, d_wghtc, d_wghtf, d_cbc, d_jgl, d_jgt,  &
+          d_all(1,1), d_all(1,2), d_all(1,3) , d_all(1,4),  &
+          d_all(1,5),d_all(1,6), d_all(1,7),d_all(1,8),  &
+          d_all(1,9),d_all(1,10),d_all(1,11),d_all(1,12), &
+          d_all(1,13),d_all(14),d_all(15),d_all(1,16),d_all(1,17), &
+          d_all(1,18),d_all(19),d_all(1,20),d_all(1,21),d_all(1,22), &
+          d_jaco_c, &
+          toteq, nstate, nflux, nxd,nx1,nelt,ndim,  &
+          irho, iux, iuy, iuz, ipr, ithm, isnd, icpf, iph)
+
+
+
+
+      end
+      
+!----------------------------------------------------------------------------------
+      subroutine compute_primitive_vars_gpu(d_vx, d_vy, d_vz, d_vxd, &
+                        d_vyd, d_vzd, d_u, d_jgl, d_jgt, d_w)
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'GEOM.cuf'
+      include 'CMTDATA.cuf'
+      include 'SOLN.cuf'
+      include 'DEALIAS.cuf'
+      include  'MASS.cuf'
+      include 'DG.cuf'
+
+
+      parameter (lxyz=lx1*ly1*lz1)
+      parameter (ldg=lxd**3,lwkd=2*ldg)
+      common /dgrad/ d(ldg),dt(ldg),dg(ldg),dgt(ldg),jgl(ldg),jgt(ldg) &
+                  , wkd(lwkd)
+      common /ctmp1/ energy(lx1,ly1,lz1),scr(lx1,ly1,lz1)
+      integer e, eq
+
+      nxyz= nx1*ny1*nz1
+      ntot=nxyz*nelt
+!      call get_int_ptr(i,lx1,lxd)
+      call computeprimitivevarswrapper(d_vx, d_vy, d_vz, d_vxd, &
+                        d_vyd, d_vzd, d_u, d_jgl, d_jgt, d_w, lxd, &
+                        lx1, nelt, toteq, irpu, irpv, &
+                        irpw, irg, ldw,0)
+
+      end
+!----------------------------------------------------------------------------------
+      subroutine fluxes_full_field_gpu(d_vols,d_flux,d_iface_flux,d_u,d_unx, &
+          d_uny, d_unz, d_area, d_wghtc, d_wghtf, d_cbc, d_jgl, d_jgt,  &
+          d_all, d_jaco_c)
+!-----------------------------------------------------------------------
+! JH060314 First, compute face fluxes now that we have the primitive variables
+! JH091514 renamed from "surface_fluxes_inviscid" since it handles all fluxes
+!          that we compute from variables stored for the whole field (as
+!          opposed to one element at a time).
+!-----------------------------------------------------------------------
+      use cudafor
+      include 'SIZE.cuf'
+      include 'DG.cuf'
+      include 'SOLN.cuf'
+      include 'CMTDATA.cuf'
+      include 'INPUT.cuf'
+      include 'GEOM.cuf'
+
+      integer lfq,heresize,hdsize
+      parameter (ldg=lxd**3,lwkd=4*lxd*lxd)
+      parameter (lfq=lx1*lz1*2*ldim*lelcmt, &
+                        heresize=nqq*3*lfq, &
+                        hdsize=toteq*ldim*lfq)
+! JH070214 OK getting different answers whether or not the variables are
+!          declared locally or in common blocks. switching to a different
+!          method of memory management that is more transparent to me.
+      common /CMTSURFLX/ fatface(heresize),notyet(hdsize)
+      real fatface,notyet
+      integer eq
+
+      real, device :: d_vols(lx1,ly1,lz1,lelt,5)
+      real, device :: d_iface_flux(lx1*lz1*6,lelt)
+      real, device :: d_flux(hereSize)
+      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
+      real, device :: d_wghtc(lx1*lz1)
+      real, device :: d_wghtf(lxd*lzd)
+      real, device :: d_unx(lx1,lz1,6,lelt)
+      real, device :: d_uny(lx1,lz1,6,lelt)
+      real, device :: d_unz(lx1,lz1,6,lelt)
+      real, device :: d_cbc(lx1,lz1)
+      real, device :: d_all(lelt*6*lxd*lzd,26)
+      real, device :: d_jaco_c(lelt*6*lx1*lz1)
+      real, device :: d_area(lx1,lz1,6,lelt)
+      real, device :: d_jgl(ldg)
+      real, device :: d_jgt(ldg)
+      character*32 cname
+      nfq=nx1*nz1*2*ndim*nelt
+      nstate = nqq
+      ntot1 = nfq*nstate
+! where different things live
+      iqm =1
+      iqp =iqm+nstate*nfq
+      iflx=iqp+nstate*nfq
+      !print *, nstate, nfq, toteq, iu1,iface_flux(1,1)
+
+!      call fillq(irho,vtrans,fatface(iqm),fatface(iqp))
+!      call fillq(iux, vx,    fatface(iqm),fatface(iqp)) !- level4.txt
+!      call fillq(iuy, vy,    fatface(iqm),fatface(iqp))
+!      call fillq(iuz, vz,    fatface(iqm),fatface(iqp))
+!      call fillq(ipr, pr,    fatface(iqm),fatface(iqp))
+      call fillq_gpu(d_vols(1,1,1,1,1),d_vols(1,1,1,1,2),d_vols(1,1,1,1,3), &
+                          d_vols(1,1,1,1,4), d_vols(1,1,1,1,5), &
+                          d_flux(iqm),d_iface_flux)
+      i_cvars=(iu1-1)*nfq+1
+!      do eq=1,toteq
+!         call faceu(eq,fatface(i_cvars)) !- level4.txt
+!         i_cvars=i_cvars+nfq
+!      enddo
+      eq_g = toteq
+      call faceu_gpu(toteq,d_flux(i_cvars),d_u,d_iface_flux)
+      istate = cudaMemcpy(fatface(iqp),d_flux(iqm),nfq*nstate, &
+                          cudaMemcpyDevicetoHost) 
+
+      call face_state_commo(fatface(iqm),fatface(iqp),nfq,nstate &
+                          ,dg_hndl) !- level4.txt
+      istate = cudaMemcpy(d_flux(iqp),fatface(iqp),nfq*nstate, &
+                          cudaMemcpyHosttoDevice) 
+      
+
+!      call InviscidFlux(fatface(iqm),fatface(iqp),fatface(iflx) &
+!                      ,nstate,toteq) !- level4.txt
+!      call InviscidFlux_gpu(d_flux(iqm),d_flux(iqp),d_flux(iflx),d_unx, &
+!          d_uny, d_unz, d_area, d_wghtc, d_wghtf, d_cbc, d_jgl, d_jgt,  &
+!          d_all, d_jaco_c, nstate,toteq) !- level4.txt
+      call InviscidFluxwrapper(d_flux(iqm), d_flux(iqp), d_flux(iflx), &
+          d_unx, d_uny, &
+          d_unz, d_area, d_wghtc, d_wghtf, d_cbc, d_jgl, d_jgt,  &
+          d_all(1,1), d_all(1,2), d_all(1,3) , d_all(1,4),  &
+          d_all(1,5),d_all(1,6), d_all(1,7),d_all(1,8),  &
+          d_all(1,9),d_all(1,10),d_all(1,11),d_all(1,12), &
+          d_all(1,13),d_all(14),d_all(15),d_all(1,16),d_all(1,17), &
+          d_all(1,18),d_all(19),d_all(1,20),d_all(1,21),d_all(1,22), &
+          d_jaco_c, &
+          toteq, nstate, nflux, nxd,nx1,nelt,ndim,  &
+          irho, iux, iuy, iuz, ipr, ithm, isnd, icpf, iph)   
+      return
+      end
+
+!----------------------------------------------------------------------------------
+      subroutine assemble_flux_compute_gpu(d_jgl,d_jgt,d_totalh,d_u, &
+      d_ur,d_us,d_phig, d_pr,d_vxd,d_vyd,d_vzd,d_ut,d_ud,d_tu,d_rx,d_dg, &
+      d_dgt,d_res1, d_w,d_jacmi,d_bm1,d_usrf,d_d,d_dt,nl,tote,lwkd)
+      include 'SIZE.cuf'
+      include 'CMTDATA.cuf'
+      include 'INPUT.cuf'
+      include  'GEOM.cuf'
+      include  'MASS.cuf'
+      include  'SOLN.cuf'
+      include  'DEALIAS.cuf'
+
+
+      parameter (ldd=lxd*lyd*lzd)
+      parameter (ldg=lxd**3,lwkd=2*ldg)
+      common /ctmp1/ ur(ldd),us(ldd),ut(ldd),ju(ldd),ud(ldd),tu(ldd)
+!      real ju
+      common /dgrad/ d(ldg),dt(ldg),dg(ldg),dgt(ldg),jgl(ldg),jgt(ldg) &
+                  , wkd(lwkd)
+!      real jgl,jgt
+
+      Integer ii, nl,tote
+!      call get_int_ptr(ii,nx1,nxd)
+!      call get_dgl_ptr(ip,nxd,nxd) ! fills dg, dgt
+
+!      print *,'hello',if3d,u(1,1,1,1,1),nl,tote,ii,ip;
+      call computestageWrapper(d_jgl,d_jgt,d_totalh,d_u,d_ur,d_us,d_phig, &
+      d_pr,d_vxd,d_vyd,d_vzd,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_res1, &
+      d_w,d_jacmi,d_bm1,d_usrf,d_d,d_dt,nl,tote,ndim,lwkd,nx1,nxd)
+      !print *, 'res1',res1(1,1,1,1,1)
+      open(unit = 24, file = "ttt.txt")
+      write(24,*) "tt"
+      close(24)
+
+      return
+      end
+
+
+
+
+!----------------------------------------------------------------------------------
