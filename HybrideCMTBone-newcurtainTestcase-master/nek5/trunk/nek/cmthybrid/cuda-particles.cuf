@@ -396,3 +396,122 @@ c      pttime(35) = pttime(35) + dnekclock() - ptdum(35)
       end
 
 !------------------------------------------------------------------------------
+c----------------------------------------------------------------------
+c     particle force routines
+c----------------------------------------------------------------------
+      subroutine usr_particles_solver
+c
+c     call routines in ordered way - main solver structure
+c
+      include 'SIZE.cuf'
+      include 'TOTAL.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTPART.cuf'
+
+      logical ifinject
+      integer icalld
+      save    icalld
+      data    icalld  /-1/
+
+      ! begin timer
+      ptdum(5) = dnekclock()
+
+c     should we inject particles  -  not included for this phase
+c      ifinject = .false.
+c      if (inject_rate .gt. 0) then
+c      if ((mod(istep,inject_rate).eq.0)) then
+c         ifinject = .true.
+c      endif
+c      endif
+c----------time
+c      if (istep .gt. time_delay) then
+
+c     bdf/ext integration ---------------------------------------------
+      if (time_integ .eq. 0) then
+         if (icalld .ne. istep) then
+            call update_particle_location   ! move outlier particles
+            if (ifinject) call place_particles
+            call move_particles_inproc      ! update mpi rank
+            call interp_props_part_location ! interpolate
+            call usr_particles_forces       ! fluid to part. forcing
+            call update_vel_and_pos_bdf     ! time integration
+            call compute_forces_post_part   ! update forces
+            if (two_way.eq.1) then          ! part. to fluid forcing
+               call particles_solver_nearest_neighbor ! nn
+               call spread_props_grid       ! put particle props on grid
+            endif
+
+            icalld = istep
+         endif
+c     rk3 integration -------------------------------------------------
+      elseif (time_integ .eq. 1) then
+         if (stage.eq.1) then
+            call update_particle_location_gpu   ! move outlier particles
+            if (ifinject) call place_particles
+            call move_particles_inproc      ! update mpi rank
+         endif
+         call interp_props_part_location    ! interpolate
+         call usr_particles_forces          ! fluid to part. forcing
+         call update_vel_and_pos_rk3        ! time integration
+         call compute_forces_post_part ! update forces
+         if (two_way.eq.1) then             ! part. to fluid forcing
+            call particles_solver_nearest_neighbor    ! nn
+            call spread_props_grid          ! put particle props on grid
+         endif
+
+c     PIEP ------------------------------------------------------------
+      elseif (time_integ .eq. 2) then
+      endif
+
+c      endif
+
+      ntmp = iglsum(n,1) ! collective communication call to sync up
+      ! end timer
+      pttime(5) = pttime(5) + dnekclock() - ptdum(5)
+
+      return
+      end
+c----------------------------------------------------------------------
+!----------------------------------------------------------------------
+      subroutine update_particle_location_gpu
+      include 'SIZE.cuf'
+      include 'TOTAL.cuf'
+      include 'CTIMER.cuf'
+      include 'CMTPART.cuf'
+
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      real, device :: d_xdrange(2,3)
+      integer, device :: d_in_part(llpart)
+      integer, device :: d_bc_part(6)    ! Need to allocate this somewhere
+      if(n.gt.0) then
+         call update_particle_location_wrapper(d_rpart, d_ipart, d_xdrange,
+     >         d_in_part, d_bc_part, ndim, nr, ni, n, jx, jx1, jx2, jx3)
+         istate = cudaMemcpy(rpart,d_rpart,nr*n, &
+                          cudaMemcpyDevicetoHost)
+         istate = cudaMemcpy(ipart,d_ipart,ni*n, &
+                          cudaMemcpyDevicetoHost)
+      endif
+      nbc_sum = abs(bc_part(1)) + abs(bc_part(2)) +
+     >          abs(bc_part(3)) + abs(bc_part(4)) +
+     >          abs(bc_part(5)) + abs(bc_part(6)) ! all periodic, don't search
+      if (nbc_sum .gt. 0) then
+      ic = 0
+c     right now couldnt think of a way to parallelize this memory update operation due to synchronization problem
+c     Need to talk to Dr.Tania and Dr.Ranka to see if there is a way to parallelize this
+      do i=1,n
+         if (in_part(i).eq.0) then
+            ic = ic + 1
+            if (i .ne. ic) then
+               call copy(rpart(1,ic),rpart(1,i),nr)
+               call icopy(ipart(1,ic),ipart(1,i),ni)
+            endif
+         endif
+      enddo
+      n = ic
+      endif
+
+      return
+      end
+
+c------------------------------------------------------------------------------
