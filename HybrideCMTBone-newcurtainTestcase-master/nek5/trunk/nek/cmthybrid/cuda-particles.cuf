@@ -429,10 +429,10 @@ c      if (istep .gt. time_delay) then
 c     bdf/ext integration ---------------------------------------------
       if (time_integ .eq. 0) then
          if (icalld .ne. istep) then
-            call update_particle_location   ! move outlier particles
+            call update_particle_location_gpu   ! move outlier particles
             if (ifinject) call place_particles
             call move_particles_inproc      ! update mpi rank
-            call interp_props_part_location ! interpolate
+            call interp_props_part_location_gpu  ! interpolate
             call usr_particles_forces       ! fluid to part. forcing
             call update_vel_and_pos_bdf     ! time integration
             call compute_forces_post_part   ! update forces
@@ -450,7 +450,7 @@ c     rk3 integration -------------------------------------------------
             if (ifinject) call place_particles
             call move_particles_inproc      ! update mpi rank
          endif
-         call interp_props_part_location    ! interpolate
+         call interp_props_part_location_gpu    ! interpolate
          call usr_particles_forces          ! fluid to part. forcing
          call update_vel_and_pos_rk3        ! time integration
          call compute_forces_post_part ! update forces
@@ -515,3 +515,37 @@ c     Need to talk to Dr.Tania and Dr.Ranka to see if there is a way to parallel
       end
 
 c------------------------------------------------------------------------------
+c-----------------------------------------------------------------------
+      subroutine interp_props_part_location_gpu
+      include 'SIZE.cuf'
+      include 'INPUT.cuf'
+      include 'SOLN.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTPART.cuf'
+      include 'GEOM.cuf'
+      common /BARRYREP/ rep, bot
+      real              rep(lx1,ly1,lz1), bot
+
+      common /point2gridc/ p2gc
+      real   p2gc(lx1,ly1,lz1,lelt,4)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      real, device :: d_vx(lx1,ly1,lz1,nelt)
+      real, device :: d_vy(lx1,ly1,lz1,nelt)
+      real, device :: d_vz(lx1,ly1,lz1,nelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,lelt)
+      real, device :: d_t(lx1,ly1,lz1,lelt)
+
+      nxyz = nx1*ny1*nz1;
+
+      if (n.gt.0) then
+            call interp_props_part_location_wrapper(d_rpart,d_ipart,d_vx,
+     >            d_vy,d_vz,d_t,d_vtrans,rep,xgll,ygll,zgll,wxgll,wygll,
+     >            wzgll,nx1r,nx1,nr,jr,nelt,ju0,je0,jtemp,jrho)
+            istate = cudaMemcpy(rpart,d_rpart,nr*n, &
+                             cudaMemcpyDevicetoHost)
+      endif
+      return
+      end
+
+c--------------------------------------------------------------------------

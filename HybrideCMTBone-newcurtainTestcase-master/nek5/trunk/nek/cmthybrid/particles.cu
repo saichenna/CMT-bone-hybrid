@@ -107,6 +107,126 @@ __global__ void update_particle_location(double *rpart1, int *ipart, double *xdr
 }
 
 
+__global__ void interp_props_part_location(double *rpart,double *vx,double *vy,double *vz,double *t,double *vtrans,double *rep,double *xgll,double *ygll,double *zgll,double *wxgll,double *wygll,double *wzgll,int nx1r,int nx1,int nr,int jr,int ju0, int je0,int jtemp, int jrho){
+    int id = blockIdx.x*blockDim.x+threadIdx.x;
+    double x,y,z;
+    double bot = 0.0;
+    double diff;
+    double repdum;
+    double bwgtz[nx1];
+    double bwgty[nx1];
+    double bwgtx[nx1];
+    x = rpart[id*nr+jr];
+    y = rpart[id*nr+jr+1];
+    z = rpart[id*nr+jr+2];
+// barycentric interpolation initialization
+    for (int k = 0; k < nx1r; k++){
+          diff = z - zgll[k];
+          if (fabs(diff) < 1.0e-16){
+                if (diff > 0){
+                      diff = 1.0e-16;
+                }
+                else{
+                      diff = -1.0e-16;
+                }
+
+          }
+          bwgtz[k] = wzgll[k]/diff;
+   }
+   for (int i = 0; i < nx1r; i++){
+         diff = x - xgll[i];
+         if (fabs(diff) < 1.0e-16){
+               if (diff > 0){
+                     diff = 1.0e-16;
+               }
+               else{
+                     diff = -1.0e-16;
+               }
+
+         }
+         bwgtx[i] = wxgll[i]/diff;
+  }
+  for (int j = 0; j < nx1r; j++){
+        diff = y - ygll[j];
+        if (fabs(diff) < 1.0e-16){
+             if (diff > 0){
+                    diff = 1.0e-16;
+             }
+             else{
+                    diff = -1.0e-16;
+             }
+
+        }
+        bwgty[j] = wygll[j]/diff;
+ }
+
+ for(int k=0; k<nx1r;k++){
+       for(int j=0; j<nx1r; j++){
+           repdum = bwgty[j] * bwgtz[k] ;
+           for(int i = 0; i<nx1r; i++){
+               rep[k*nx1r*nx1r+j*nx1r+i] = repdum * bwgtx[i];
+               bot = bot + rep[k*nx1*nx1+j*nx1+i];
+           }
+       }
+   }
+for(int k=0; k<nx1r;k++){
+      for(int j=0; j<nx1r; j++){
+            for(int i = 0; i<nx1r; i++){
+                  rep[k*nx1r*nx1r+j*nx1r+i] = rep[k*nx1r*nx1r+j*nx1r+i]/bot;
+            }
+
+      }
+
+}
+
+// barycentric interpolation initialization ends  //
+
+int ie = ipart[id*ni+je0];
+double top1 = 0.0, top2 = 0.0, top3 = 0.0, top4 = 0.0, top5 = 0.0;
+int nxyz = nx1*nx1*nx1;
+double *fieldx = vx+ie*nxyz;
+double *fieldy = vy+ie*nxyz;
+double *fieldz = vz+ie*nxyz;
+double *fieldt = t+ie*nxyz;
+double *fieldvtrans = vtrans+ie*nxyz;
+//full interpolation
+if (nx1r == nx1){
+      for (int i=0; i< nxyz; i++){
+            top1 = top1 + rep[i]*fieldx[i];
+            top2 = top2 + rep[i]*fieldy[i];
+            top3 = top3 + rep[i]*fieldz[i];
+            top4 = top4 + rep[i]*fieldt[i];
+            top5 = top5 + rep[i]*fieldvtrans[i];
+      }
+      rpart[id*nr+ju0] = top1;
+      rpart[id*nr+ju0+1] = top2;
+      rpart[id*nr+ju0+2] = top3;
+      rpart[id*nr+jtemp] = top4;
+      rpart[id*nr+jrho] = top5;
+}
+
+else{
+      // reduced barycentric interpolation
+      int kk = 0,jj = 0, ii = 0;
+      double ijk3,ijk2,ijk1;
+      for (int k=0;k < nx1; k+=2){
+            for (int j=0;j<nx1;j+=2){
+                  for (int i=0;i<nx1;i+=2){
+                        top1 = top1+rep[k*nx1*nx1+j*nx1+i]*fieldx[k*nx1*nx1+j*nx1+i];
+                        top2 = top2+rep[k*nx1*nx1+j*nx1+i]*fieldy[k*nx1*nx1+j*nx1+i];
+                        top3 = top3+rep[k*nx1*nx1+j*nx1+i]*fieldz[k*nx1*nx1+j*nx1+i];
+                        top4 = top4+rep[k*nx1*nx1+j*nx1+i]*fieldx[k*nx1*nx1+j*nx1+i];
+                        top5 = top5+rep[k*nx1*nx1+j*nx1+i]*fieldx[k*nx1*nx1+j*nx1+i];
+                  }
+            }
+      }
+      rpart[id*nr+ju0] = top1;
+      rpart[id*nr+ju0+1] = top2;
+      rpart[id*nr+ju0+2] = top3;
+      rpart[id*nr+jtemp] = top4;
+      rpart[id*nr+jrho] = top5;
+
+}
 
 // __global__ void update_data_if_outflow(double *rpart1, int *ipart1, double *in_part, int *in_part, int ic, int nr, int ir){
 //       int id = blockIdx.x*blockDim.x+threadIdx.x;
@@ -282,3 +402,127 @@ extern "C" void update_particle_location_wrapper_(double *rpart, int *ipart, dou
   //printf("particles in nid time is %f\n",time*1e-03);
 
 }
+
+extern "C" void interp_props_part_location_wrapper_(double *rpart,int *ipart,double *vx, double *vy, double *vz,double *t, double *vtrans, double *rep, double *xgll, double *ygll, double *zgll, double *wxgll, double *wygll, double *wzgll,int* nx1r,int* nx1, int* nr, int* ni,int* n,int* jr,int* nelt,int* ju0,int* je0,int* jtemp,int* jrho){
+
+    float time;
+    cudaEvent_t startEvent, stopEvent;
+    cudaEventCreate(&startEvent);
+    cudaEventCreate(&stopEvent);
+    cudaEventRecord(startEvent, 0);
+
+    bool inCPU = false;
+    double *d_rpart,*d_vx,*d_vy, *d_vz, *d_t, *d_vtrans;
+    int *d_ipart;
+    if(inCPU){
+d_rpart,d_ipart,d_vx,d_vy,d_vz,d_t,d_vtrans,d_rep,d_xgll,d_ygll,d_zgll,d_wxgll,d_wygll,d_wzgll,nx1r[0],nx1[0],nr[0],jr[0],ju0[0],je0[0],jtemp[0],jrho[0]
+        cudaMalloc(&d_rpart, n[0]*nr[0]*sizeof(double));
+        cudaMalloc(&d_ipart, n[0]*ni[0]*sizeof(int));
+        cudaMalloc(&d_vx, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double));
+        cudaMalloc(&d_vy, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double));
+        cudaMalloc(&d_vz, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double));
+        cudaMalloc(&d_t, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double));
+        cudaMalloc(&d_vtrans, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double));
+       cudaMalloc(&d_rep, nx1[0]*nx1[0]*nx1[0]*sizeof(double));
+       cudaMalloc(&d_xgll, nx1[0]*sizeof(double));
+       cudaMalloc(&d_ygll, nx1[0]*sizeof(double));
+       cudaMalloc(&d_zgll, nx1[0]*sizeof(double));
+       cudaMalloc(&d_wxgll, nx1[0]*sizeof(double));
+       cudaMalloc(&d_wygll, nx1[0]*sizeof(double));
+       cudaMalloc(&d_wzgll, nx1[0]*sizeof(double));
+       cudaMemcpy(d_rpart, rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_ipart, ipart, n[0]*ni[0]*sizeof(int), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_vx, vx, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_vy, vy, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_vz, vz, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_t, t, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_vtrans, vtrans, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_rep, rep, nx1[0]*nx1[0]*nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_xgll, xgll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_ygll, ygll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_zgll, zgll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_wxgll, wxgll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_wygll, wygll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_wzgll, wzgll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+
+
+  }
+  else{
+      d_rpart= rpart;
+      d_ipart = ipart;
+      d_vx = vx;
+      d_vy = vy;
+      d_vz = vz;
+      d_t =t;
+      d_vtrans = vtrans;
+      cudaMalloc(&d_rep, nx1[0]*nx1[0]*nx1[0]*sizeof(double));
+      cudaMalloc(&d_xgll, nx1[0]*sizeof(double));
+      cudaMalloc(&d_ygll, nx1[0]*sizeof(double));
+      cudaMalloc(&d_zgll, nx1[0]*sizeof(double));
+      cudaMalloc(&d_wxgll, nx1[0]*sizeof(double));
+      cudaMalloc(&d_wygll, nx1[0]*sizeof(double));
+      cudaMalloc(&d_wzgll, nx1[0]*sizeof(double));
+      cudaMemcpy(d_rep, rep, nx1[0]*nx1[0]*nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+      cudaMemcpy(d_xgll, xgll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+      cudaMemcpy(d_ygll, ygll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+      cudaMemcpy(d_zgll, zgll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+      cudaMemcpy(d_wxgll, wxgll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+      cudaMemcpy(d_wygll, wygll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+      cudaMemcpy(d_wzgll, wzgll, nx1[0]*sizeof(double), cudaMemcpyHostToDevice);
+  }
+  int blockSize = 1024, gridSize;
+  gridSize = (int)ceil((float)n[0]/blockSize);
+  interp_props_part_location<<<gridSize, blockSize>>>(d_rpart,d_vx,d_vy,d_vz,d_t,d_vtrans,d_rep,d_xgll,d_ygll,d_zgll,d_wxgll,d_wygll,d_wzgll,nx1r[0],nx1[0],nr[0],jr[0],ju0[0],je0[0],jtemp[0],jrho[0]);
+  if(inCPU){
+      cudaMemcpy(ipart, d_ipart, n[0]*ni[0]*sizeof(int), cudaMemcpyDeviceToHost);
+      cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(vx, d_vx, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(vy, d_vy, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(vz, d_vz, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(t, d_t, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(vtrans, d_vtrans, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(rep, d_rep, nx1[0]*nx1[0]*nx1[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(xgll, d_xgll, nx1[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(ygll, d_ygll, nx1[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(zgll, d_zgll, nx1[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(wxgll, d_wxgll, nx1[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(wygll, d_wygll, nx1[0]*sizeof(double), cudaMemcpyDeviceToHost);
+      cudaMemcpy(wzgll, d_wzgll, nx1[0]*sizeof(double), cudaMemcpyDeviceToHost);
+
+      //free
+      cudaFree(d_rpart);
+      cudaFree(d_ipart);
+      cudaFree(d_vx);
+      cudaFree(d_vy);
+      cudaFree(d_vz);
+      cudaFree(d_t);
+      cudaFree(d_vtrans);
+     cudaFree(d_rep);
+     cudaFree(d_xgll);
+     cudaFree(d_ygll);
+     cudaFree(d_zgll);
+     cudaFree(d_wxgll);
+     cudaFree(d_wygll);
+     cudaFree(d_wzgll);
+  }
+
+  else{
+       cudaMemcpy(rep,d_rep, nx1[0]*nx1[0]*nx1[0]*sizeof(double), cudaMemcpyDeviceToHost);
+
+        //free
+       cudaFree(d_rep);
+       cudaFree(d_xgll);
+       cudaFree(d_ygll);
+       cudaFree(d_zgll);
+       cudaFree(d_wxgll);
+       cudaFree(d_wygll);
+       cudaFree(d_wzgll);
+
+ }
+  cudaEventRecord(stopEvent, 0);
+  cudaEventSynchronize(stopEvent);
+  cudaEventElapsedTime(&time, startEvent, stopEvent);
+
+  }
+
+ c---------------------------------------------------------------------------
