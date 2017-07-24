@@ -227,6 +227,171 @@ else{
       rpart[id*nr+jrho] = top5;
 
 }
+}
+
+//-----------------------------------------------------------
+
+__global__ void usr_particles_forces_bdf(double *rpart, int n, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd){
+    int id = blockIdx.x*blockDim.x+threadIdx.x;
+    if(id < n){
+//          int i = id/ndim;
+//          int j = id%ndim;
+          double pmass,pmassf,rdum;
+          double uvel[3],vvel[3];
+          double c0,T0,mu_p,Re_p,M_p,vel_diff;
+          pmass = rpart[id*nr+jvol]*rpart[id*nr+jrhop];
+          //compute_re_particles
+          uvel[0] = rpart[id*nr+ju0];
+          uvel[1] = rpart[id*nr+ju0+1];
+          uvel[2] = rpart[id*nr+ju0+2];
+          vvel[0] = rpart[id*nr+jv0];
+          vvel[1] = rpart[id*nr+jv0+1];
+          vvel[2] = rpart[id*nr+jv0+2];
+          c0 = 120.0;
+          T0 = 291.15;
+          c_sound = 1000000; //fix this at the host level so that no concurrency issues arise
+          rpart[id*nr+ja] = c_sound;
+          mu_p = mu_0;
+          vel_diff = sqrt(((uvel[0]-vvel[0])*(uvel[0]-vvel[0]))+((uvel[0]-vvel[0])*(uvel[1]-vvel[1]))+((uvel[2]-vvel[2])*(uvel[2]-vvel[2])));
+          Re_p = rpart[id*nr+jrho]*rpart[id*nr+jdp]*vel_diff/mu_p;
+          M_p = vel_diff/rpart[id*nr+ja];
+          rpart[id*nr+jre] = Re_p;
+          //compute_re_particles ends
+
+          for (int k =0 ; k < ndim[0] ; k++){
+            if (k == 1){
+              rpart[id*nr+jfusr+k] = -1;
+            }
+            else{
+              rpart[id*nr+jfusr+k] = 0;
+            }
+            rdum = 0;
+            rdum = rdum+rpart[id*nr+jfusr+k];
+            rpart[id*nr+jf0+k] = rdum/pmass;
+          }
+        }
+
+//---------------------------------------------------------------------------
+
+__global__ void usr_particles_forces_rk3(double *rpart, int n, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd){
+    int id = blockIdx.x*blockDim.x+threadIdx.x;
+    if(id < n){
+//          int i = id/ndim;
+//          int j = id%ndim;
+          double pmass,pmassf,rdum,cd,S_qs;
+          double uvel[3],vvel[3];
+          double c0,T0,mu_p,Re_p,M_p,vel_diff;
+          pmass = rpart[id*nr+jvol]*rpart[id*nr+jrhop];
+          pmassf = rpart[id*nr+jvol]*rpart[id*nr+jrho];
+          //compute_re_particles
+          uvel[0] = rpart[id*nr+ju0];
+          uvel[1] = rpart[id*nr+ju0+1];
+          uvel[2] = rpart[id*nr+ju0+2];
+          vvel[0] = rpart[id*nr+jv0];
+          vvel[1] = rpart[id*nr+jv0+1];
+          vvel[2] = rpart[id*nr+jv0+2];
+          c0 = 120.0;
+          T0 = 291.15;
+          c_sound = 1000000; //fix this at the host level so that no concurrency issues arise
+          rpart[id*nr+ja] = c_sound;
+          mu_p = mu_0;
+          vel_diff = sqrt(((uvel[0]-vvel[0])*(uvel[0]-vvel[0]))+((uvel[0]-vvel[0])*(uvel[1]-vvel[1]))+((uvel[2]-vvel[2])*(uvel[2]-vvel[2])));
+          Re_p = rpart[id*nr+jrho]*rpart[id*nr+jdp]*vel_diff/mu_p;
+          M_p = vel_diff/rpart[id*nr+ja];
+          rpart[id*nr+jre] = Re_p;
+          //compute_re_particles ends
+
+          for (int k =0 ; k < ndim[0] ; k++){
+            if (k == 1){
+              rpart[id*nr+jfusr+k] = -1;
+            }
+            else{
+              rpart[id*nr+jfusr+k] = 0;
+            }
+            //----------usr_particles_f_qs_rk3 starts
+            cd = 0;
+            S_qs = rpart[id*nr+jvol]*rpart[id*nr+jrhop]/rpart[id*nr+jtaup];
+            rpart[id*nr+jcd+k] = cd;
+            rpart[id*nr+jfqs+k] = S_qs*(uvel[k] - vvel[k]);
+            rdum = 0;
+            rdum = rdum+rpart[id*nr+jfusr+k];
+            rdum = rdum+rpart[id*nr+jfqs+k];
+            rpart[id*nr+jf0+k] = rdum/pmass;
+          }
+        }
+
+__global__ void update_vel_and_pos_bdf(double *rpart, int n, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd){
+  int id = blockIdx.x*blockDim.x+threadIdx.x;
+  double s;
+  if(id < n){
+    for(int k=0; k < ndim ; k++)
+    {
+      // move data to previous position
+      rpart[id*nr+ju3+k] = rpart[id*nr+ju2+k];
+      rpart[id*nr+ju2+k] = rpart[id*nr+ju1+k];
+      rpart[id*nr+ju1+k] = rpart[id*nr+ju0+k];
+      rpart[id*nr+jv3+k] = rpart[id*nr+jv2+k];
+      rpart[id*nr+jv2+k] = rpart[id*nr+jv1+k];
+      rpart[id*nr+jv1+k] = rpart[id*nr+jv0+k];
+      rpart[id*nr+jx3+k] = rpart[id*nr+jx2+k];
+      rpart[id*nr+jx2+k] = rpart[id*nr+jx1+k];
+      rpart[id*nr+jx1+k] = rpart[id*nr+jx0+k];
+
+
+    }
+
+    // solve for velocity
+    s = 1/rpart[id*nr+jtaup];
+    for( int k = 0;k < ndim ; k++)
+    {
+      rhs = s*((alpha[1]*rpart[id*nr+ju1+k])+(alpha[2]*rpart[id*nr+ju2+k])+(alpha[3]*rpart[id*nr+ju3+k])+rpart[id*nr+jf0+k]+(beta[1]*rpart[id*nr+jv1+k])+(beta[2]*rpart[id*nr+jv2+k])+(beta[3]*rpart[id*nr+jv3+k]);
+      rpart[id*nr+jv0+k] = rhs/(beta[0]+s);
+      rhx = beta[1]*rpart[id*nr+jx1+k]+beta[2]*rpart[id*nr+jx2+k]+beta[3]*rpart[id*nr+jx3+k]+rpart[id*nr+jv0+k];
+      rpart[id*nr+jx0+k] = rhx/beta[0]
+    }
+  }
+}
+
+//----------
+__global__ void update_vel_and_pos_rk3(double *rpart, double *kv_stage_p, double *kx_stage_p, int n, int nr,int jv0,int jv1,int jv2,int jv3,int ju0,int ju1,int ju2,int ju3, int jx0, int jx1, int jx2, int jx3, int jf0, int fmfac){
+    int id = blockIdx.x*blockDim.x+threadIdx.x;
+
+    if(id < n){
+      if (stage == 1){
+        for(int k=0; k < ndim ; k++)
+        {
+          // move data to previous position
+          rpart[id*nr+ju3+k] = rpart[id*nr+ju2+k];
+          rpart[id*nr+ju2+k] = rpart[id*nr+ju1+k];
+          rpart[id*nr+ju1+k] = rpart[id*nr+ju0+k];
+          rpart[id*nr+jv3+k] = rpart[id*nr+jv2+k];
+          rpart[id*nr+jv2+k] = rpart[id*nr+jv1+k];
+          rpart[id*nr+jv1+k] = rpart[id*nr+jv0+k];
+          rpart[id*nr+jx3+k] = rpart[id*nr+jx2+k];
+          rpart[id*nr+jx2+k] = rpart[id*nr+jx1+k];
+          rpart[id*nr+jx1+k] = rpart[id*nr+jx0+k];
+          kv_stage_p[id*12+k] = rpart[id*nr+jv0+k];
+          kx_stage_p[id*12+k] = rpart[id*nr+jx0+k];
+
+        }
+
+      }
+
+      for(int k=0; k < ndim; k++)
+      {
+        kv_stage_p[id*12+stage*3+k] = rpart[id*nr+jf0+k];
+        kx_stage_p[id*12+stage*3+k] = rpart[id*nr+jv0+k];
+
+      }
+
+      if (stage == 3){
+        rpart[id*nr+jx0+k] = kx_stage_p[id*12+k]+fmfac*(kx_stage_p[id*12+3+k]+4.0*kx_stage_p[id*12+6+k]+kx_stage_p[id*12+9+k]);
+        rpart[id*nr+jv0+k] = kv_stage_p[id*12+k]+fmfac*(kv_stage_p[id*12+3+k]+4.0*kv_stage_p[id*12+6+k]+kv_stage_p[id*12+9+k]);
+
+      }
+    }
+}
+
 
 // __global__ void update_data_if_outflow(double *rpart1, int *ipart1, double *in_part, int *in_part, int ic, int nr, int ir){
 //       int id = blockIdx.x*blockDim.x+threadIdx.x;
@@ -415,7 +580,7 @@ extern "C" void interp_props_part_location_wrapper_(double *rpart,int *ipart,dou
     double *d_rpart,*d_vx,*d_vy, *d_vz, *d_t, *d_vtrans;
     int *d_ipart;
     if(inCPU){
-d_rpart,d_ipart,d_vx,d_vy,d_vz,d_t,d_vtrans,d_rep,d_xgll,d_ygll,d_zgll,d_wxgll,d_wygll,d_wzgll,nx1r[0],nx1[0],nr[0],jr[0],ju0[0],je0[0],jtemp[0],jrho[0]
+
         cudaMalloc(&d_rpart, n[0]*nr[0]*sizeof(double));
         cudaMalloc(&d_ipart, n[0]*ni[0]*sizeof(int));
         cudaMalloc(&d_vx, nx1[0]*nx1[0]*nx1[0]*nelt[0]*sizeof(double));
@@ -525,4 +690,102 @@ d_rpart,d_ipart,d_vx,d_vy,d_vz,d_t,d_vtrans,d_rep,d_xgll,d_ygll,d_zgll,d_wxgll,d
 
   }
 
- c---------------------------------------------------------------------------
+ //---------------------------------------------------------------------------
+ extern "C" void usr_particles_forces_bdf_wrapper_(double *rpart, int *n, int* nr,int* jvol,int* jrhop, int* jfusr, int* jf0,int* jrho,int* jfqs,int* ju0,int* jv0, int* ja, int* jdp, int* jre, int* jtaup, int* jcd){
+
+     float time;
+     cudaEvent_t startEvent, stopEvent;
+     cudaEventCreate(&startEvent);
+     cudaEventCreate(&stopEvent);
+     cudaEventRecord(startEvent, 0);
+
+     bool inCPU = false;
+     double *d_rpart;
+     if(inCPU){
+       cudaMalloc(&d_rpart, n[0]*nr[0]*sizeof(double));
+       cudaMemcpy(d_rpart, rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyHostToDevice);
+     }
+     else{
+       d_rpart= rpart;
+     }
+     int blockSize = 1024, gridSize;
+     gridSize = (int)ceil((float)n[0]/blockSize);
+     usr_particles_forces_bdf<<<gridSize, blockSize>>>(d_rpart,n[0],nr[0],jvol[0],jrhop[0],jfusr[0],jf0[0],jrho[0],jfqs[0],ju0[0],jv0[0],ja[0],jdp[0],jre[0],jtaup[0],jcd[0]);
+     if(inCPU){
+         cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
+         //free
+         cudaFree(d_rpart);
+     }
+
+     cudaEventRecord(stopEvent, 0);
+     cudaEventSynchronize(stopEvent);
+     cudaEventElapsedTime(&time, startEvent, stopEvent);
+}
+
+
+//---------------------------------------------------------
+
+//---------------------------------------------------------------------------
+extern "C" void usr_particles_forces_rk3_wrapper_(double *rpart, int* n, int* nr, int* jvol,int* jrhop, int* jfusr, int* jf0,int* jrho,int* jfqs,int* ju0,int* jv0, int* ja, int* jdp, int* jre, int* jtaup, int* jcd){
+
+    float time;
+    cudaEvent_t startEvent, stopEvent;
+    cudaEventCreate(&startEvent);
+    cudaEventCreate(&stopEvent);
+    cudaEventRecord(startEvent, 0);
+
+    bool inCPU = false;
+    double *d_rpart;
+    if(inCPU){
+      cudaMalloc(&d_rpart, n[0]*nr[0]*sizeof(double));
+      cudaMemcpy(d_rpart, rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyHostToDevice);
+    }
+    else{
+      d_rpart= rpart;
+    }
+    int blockSize = 1024, gridSize;
+    gridSize = (int)ceil((float)n[0]/blockSize);
+    usr_particles_forces_rk3<<<gridSize, blockSize>>>(d_rpart,n[0],nr[0],jvol[0],jrhop[0],jfusr[0],jf0[0],jrho[0],jfqs[0],ju0[0],jv0[0],ja[0],jdp[0],jre[0],jtaup[0],jcd[0]);
+    if(inCPU){
+        cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
+        //free
+        cudaFree(d_rpart);
+    }
+
+    cudaEventRecord(stopEvent, 0);
+    cudaEventSynchronize(stopEvent);
+    cudaEventElapsedTime(&time, startEvent, stopEvent);
+}
+
+
+//---------------------------------------------------------
+extern "C" void update_vel_and_pos_bdf_wrapper_(double *rpart, int *n, int* nr,int* jvol,int* jrhop, int* jfusr, int* jf0,int* jrho,int* jfqs,int* ju0,int* jv0, int* ja, int* jdp, int* jre, int* jtaup, int* jcd){
+
+    float time;
+    cudaEvent_t startEvent, stopEvent;
+    cudaEventCreate(&startEvent);
+    cudaEventCreate(&stopEvent);
+    cudaEventRecord(startEvent, 0);
+
+    bool inCPU = false;
+    double *d_rpart;
+    if(inCPU){
+      cudaMalloc(&d_rpart, n[0]*nr[0]*sizeof(double));
+      cudaMemcpy(d_rpart, rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyHostToDevice);
+    }
+    else{
+      d_rpart= rpart;
+    }
+    int blockSize = 1024, gridSize;
+    gridSize = (int)ceil((float)n[0]/blockSize);
+    update_vel_and_pos_bdf<<<gridSize, blockSize>>>
+    if(inCPU){
+        cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
+        //free
+        cudaFree(d_rpart);
+    }
+
+    cudaEventRecord(stopEvent, 0);
+    cudaEventSynchronize(stopEvent);
+    cudaEventElapsedTime(&time, startEvent, stopEvent);
+}

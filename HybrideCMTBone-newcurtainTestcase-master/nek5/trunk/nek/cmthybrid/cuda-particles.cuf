@@ -434,7 +434,7 @@ c     bdf/ext integration ---------------------------------------------
             call move_particles_inproc      ! update mpi rank
             call interp_props_part_location_gpu  ! interpolate
             call usr_particles_forces       ! fluid to part. forcing
-            call update_vel_and_pos_bdf     ! time integration
+            call update_vel_and_pos_bdf_gpu     ! time integration
             call compute_forces_post_part   ! update forces
             if (two_way.eq.1) then          ! part. to fluid forcing
                call particles_solver_nearest_neighbor ! nn
@@ -549,3 +549,100 @@ c-----------------------------------------------------------------------
       end
 
 c--------------------------------------------------------------------------
+
+      subroutine usr_particles_forces
+      c
+      c     calculate the rhs of particle equation
+      c
+      include 'SIZE.cuf'
+      include 'TOTAL.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTPART.cuf'
+
+      real uvel(0:2), vvel(0:2), pmass,pmassf
+
+      common /PARTRK3/ kv_stage_p, kx_stage_p
+      real kv_stage_p(llpart,4,ldim), kx_stage_p(llpart,4,ldim)
+c      real c_sound
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+
+      ! begin timer
+      ptdum(12) = dnekclock()
+
+      pi  = 4.0d+0*atan(1.0d+0)
+c      c_sound = 1000000.
+
+      if (time_integ.eq.0) then ! BDF/EXT -----------------------------
+
+      call usr_particles_forces_bdf_wrapper()
+
+      elseif (time_integ.eq.1) then ! rk3 -----------------------------
+
+      call usr_particles_forces_rk3_wrapper()
+
+
+      elseif (time_integ.eq.2) then ! PIEP ----------------------------
+
+      endif
+
+      ! end timer
+      pttime(12) = pttime(12) + dnekclock() - ptdum(12)
+
+      return
+      end
+c-----------------------------------------------------------------------
+      subroutine update_vel_and_pos_bdf_gpu
+      include 'SIZE.cuf'
+      include 'TOTAL.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTPART.cuf'
+
+      common /myparts/ times(0:3),alpha(0:3),beta(0:3)
+
+      real s,pmass
+
+      ! begin timer
+      ptdum(10) = dnekclock()
+
+      real, device :: d_rpart(lr,lpart)
+      real, device :: d_kv_stage_p(lpart,4,ldim)
+      real, device :: d_kx_stage_p(lpart,4,ldim)
+      call get_bdf_ext_coefs(beta,alpha,times)
+      jx0 = jx
+      call update_vel_and_pos_bdf_wrapper()
+
+      ! end timer
+      pttime(10) = pttime(10) + dnekclo ck() - ptdum(10)
+
+      return
+      end
+c-----------------------------------------------------------------------
+c-----------------------------------------------------------------------
+      subroutine update_vel_and_pos_rk3_gpu
+      include 'SIZE.cuf'
+      include 'TOTAL.cuf'
+      include 'CMTDATA.cuf'
+      include 'CMTPART.cuf'
+
+      common /myparts/ times(0:3),alpha(0:3),beta(0:3)
+
+      common /PARTRK3/ kv_stage_p, kx_stage_p
+      real   kv_stage_p(llpart,4,ldim), kx_stage_p(llpart,4,ldim)
+
+      integer fdim
+      real    pmass
+
+      ! begin timer
+      ptdum(11) = dnekclock()
+
+      jx0 = jx
+      call get_bdf_ext_coefs(beta,alpha,times)
+      fmfac = 1.0*dt/6.0
+      call update_vel_and_pos_rk3_wrapper()
+
+      ! end timer
+      pttime(11) = pttime(11) + dnekclock() - ptdum(11)
+
+      return
+      end
