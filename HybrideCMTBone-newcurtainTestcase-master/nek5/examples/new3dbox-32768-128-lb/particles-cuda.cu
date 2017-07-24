@@ -320,73 +320,66 @@ __global__ void usr_particles_forces_rk3(double *rpart, int n, int nr,int jvol,i
           }
         }
 
-__global__ void update_vel_and_pos_bdf(double *rpart, int n, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd){
+__global__ void update_vel_and_pos_bdf(double *rpart, int n, int ndim, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd){
   int id = blockIdx.x*blockDim.x+threadIdx.x;
   double s;
-  if(id < n){
-    for(int k=0; k < ndim ; k++)
-    {
-      // move data to previous position
-      rpart[id*nr+ju3+k] = rpart[id*nr+ju2+k];
-      rpart[id*nr+ju2+k] = rpart[id*nr+ju1+k];
-      rpart[id*nr+ju1+k] = rpart[id*nr+ju0+k];
-      rpart[id*nr+jv3+k] = rpart[id*nr+jv2+k];
-      rpart[id*nr+jv2+k] = rpart[id*nr+jv1+k];
-      rpart[id*nr+jv1+k] = rpart[id*nr+jv0+k];
-      rpart[id*nr+jx3+k] = rpart[id*nr+jx2+k];
-      rpart[id*nr+jx2+k] = rpart[id*nr+jx1+k];
-      rpart[id*nr+jx1+k] = rpart[id*nr+jx0+k];
+  if(id < n*ndim){
+    int i = id/ndim;
+    int k = id%ndim;
+    // move data to previous position
+    rpart[i*nr+ju3+k] = rpart[i*nr+ju2+k];
+    rpart[i*nr+ju2+k] = rpart[i*nr+ju1+k];
+    rpart[i*nr+ju1+k] = rpart[i*nr+ju0+k];
+    rpart[i*nr+jv3+k] = rpart[i*nr+jv2+k];
+    rpart[i*nr+jv2+k] = rpart[i*nr+jv1+k];
+    rpart[i*nr+jv1+k] = rpart[i*nr+jv0+k];
+    rpart[i*nr+jx3+k] = rpart[i*nr+jx2+k];
+    rpart[i*nr+jx2+k] = rpart[i*nr+jx1+k];
+    rpart[i*nr+jx1+k] = rpart[i*nr+jx0+k];
 
 
-    }
 
     // solve for velocity
-    s = 1/rpart[id*nr+jtaup];
-    for( int k = 0;k < ndim ; k++)
-    {
-      rhs = s*((alpha[1]*rpart[id*nr+ju1+k])+(alpha[2]*rpart[id*nr+ju2+k])+(alpha[3]*rpart[id*nr+ju3+k])+rpart[id*nr+jf0+k]+(beta[1]*rpart[id*nr+jv1+k])+(beta[2]*rpart[id*nr+jv2+k])+(beta[3]*rpart[id*nr+jv3+k]);
-      rpart[id*nr+jv0+k] = rhs/(beta[0]+s);
-      rhx = beta[1]*rpart[id*nr+jx1+k]+beta[2]*rpart[id*nr+jx2+k]+beta[3]*rpart[id*nr+jx3+k]+rpart[id*nr+jv0+k];
-      rpart[id*nr+jx0+k] = rhx/beta[0]
-    }
+    s = 1/rpart[i*nr+jtaup];
+    rhs = s*((alpha[1]*rpart[i*nr+ju1+k])+(alpha[2]*rpart[i*nr+ju2+k])+(alpha[3]*rpart[i*nr+ju3+k])+rpart[i*nr+jf0+k]+(beta[1]*rpart[i*nr+jv1+k])+(beta[2]*rpart[i*nr+jv2+k])+(beta[3]*rpart[i*nr+jv3+k]);
+    rpart[i*nr+jv0+k] = rhs/(beta[0]+s);
+    rhx = beta[1]*rpart[i*nr+jx1+k]+beta[2]*rpart[i*nr+jx2+k]+beta[3]*rpart[i*nr+jx3+k]+rpart[i*nr+jv0+k];
+    rpart[i*nr+jx0+k] = rhx/beta[0];
   }
 }
 
 //----------
-__global__ void update_vel_and_pos_rk3(double *rpart, double *kv_stage_p, double *kx_stage_p, int n, int nr,int jv0,int jv1,int jv2,int jv3,int ju0,int ju1,int ju2,int ju3, int jx0, int jx1, int jx2, int jx3, int jf0, int fmfac){
+__global__ void update_vel_and_pos_rk3(double *rpart, double *kv_stage_p, double *kx_stage_p, int n, int ndim, int nr,int jv0,int jv1,int jv2,int jv3,int ju0,int ju1,int ju2,int ju3, int jx0, int jx1, int jx2, int jx3, int jf0, int fmfac){
     int id = blockIdx.x*blockDim.x+threadIdx.x;
 
-    if(id < n){
+    if(id < n*ndim){
+      int i = id/ndim;
+      int k = id%ndim;
       if (stage == 1){
-        for(int k=0; k < ndim ; k++)
-        {
-          // move data to previous position
-          rpart[id*nr+ju3+k] = rpart[id*nr+ju2+k];
-          rpart[id*nr+ju2+k] = rpart[id*nr+ju1+k];
-          rpart[id*nr+ju1+k] = rpart[id*nr+ju0+k];
-          rpart[id*nr+jv3+k] = rpart[id*nr+jv2+k];
-          rpart[id*nr+jv2+k] = rpart[id*nr+jv1+k];
-          rpart[id*nr+jv1+k] = rpart[id*nr+jv0+k];
-          rpart[id*nr+jx3+k] = rpart[id*nr+jx2+k];
-          rpart[id*nr+jx2+k] = rpart[id*nr+jx1+k];
-          rpart[id*nr+jx1+k] = rpart[id*nr+jx0+k];
-          kv_stage_p[id*12+k] = rpart[id*nr+jv0+k];
-          kx_stage_p[id*12+k] = rpart[id*nr+jx0+k];
 
-        }
+        // move data to previous position
+        rpart[i*nr+ju3+k] = rpart[i*nr+ju2+k];
+        rpart[i*nr+ju2+k] = rpart[i*nr+ju1+k];
+        rpart[i*nr+ju1+k] = rpart[i*nr+ju0+k];
+        rpart[i*nr+jv3+k] = rpart[i*nr+jv2+k];
+        rpart[i*nr+jv2+k] = rpart[i*nr+jv1+k];
+        rpart[i*nr+jv1+k] = rpart[i*nr+jv0+k];
+        rpart[i*nr+jx3+k] = rpart[i*nr+jx2+k];
+        rpart[i*nr+jx2+k] = rpart[i*nr+jx1+k];
+        rpart[i*nr+jx1+k] = rpart[i*nr+jx0+k];
+        kv_stage_p[i*12+k] = rpart[i*nr+jv0+k];
+        kx_stage_p[i*12+k] = rpart[i*nr+jx0+k];
 
       }
 
-      for(int k=0; k < ndim; k++)
-      {
-        kv_stage_p[id*12+stage*3+k] = rpart[id*nr+jf0+k];
-        kx_stage_p[id*12+stage*3+k] = rpart[id*nr+jv0+k];
 
-      }
+      kv_stage_p[i*12+stage*3+k] = rpart[i*nr+jf0+k];
+      kx_stage_p[i*12+stage*3+k] = rpart[i*nr+jv0+k];
+
 
       if (stage == 3){
-        rpart[id*nr+jx0+k] = kx_stage_p[id*12+k]+fmfac*(kx_stage_p[id*12+3+k]+4.0*kx_stage_p[id*12+6+k]+kx_stage_p[id*12+9+k]);
-        rpart[id*nr+jv0+k] = kv_stage_p[id*12+k]+fmfac*(kv_stage_p[id*12+3+k]+4.0*kv_stage_p[id*12+6+k]+kv_stage_p[id*12+9+k]);
+        rpart[i*nr+jx0+k] = kx_stage_p[i*12+k]+fmfac*(kx_stage_p[i*12+3+k]+4.0*kx_stage_p[i*12+6+k]+kx_stage_p[i*12+9+k]);
+        rpart[i*nr+jv0+k] = kv_stage_p[i*12+k]+fmfac*(kv_stage_p[i*12+3+k]+4.0*kv_stage_p[i*12+6+k]+kv_stage_p[i*12+9+k]);
 
       }
     }
