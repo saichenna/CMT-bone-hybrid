@@ -1,0 +1,21 @@
+#!/bin/sh
+#MSUB -q psmall
+#MSUB -l nodes=4
+#MSUB -l walltime=1:00:00
+#MSUB -V
+
+numtasks=64
+CASE=b3d
+
+rm -f $CASE.his1
+rm -f $CASE.sch1
+rm -f $CASE.log1
+mv $CASE.log $CASE.log1
+mv $CASE.his $CASE.his1
+mv $CASE.sch $CASE.sch1
+rm -f logfile ioinfo
+sleep 5
+echo "running with $numtasks"
+srun -n$numtasks ./nek5000 > $CASE.log
+sleep 5
+cp $CASE.log logfile
