@@ -1,0 +1,24 @@
+343000         ! number of particles total (if inflow, number of particles injected
+2.           !    df/dp (filter width over particle diameter)
+2.          ! df/dx (filter width over grid spacing)
+0            !    number of super particle pre-iterations
+0.002         ! Gaussian is allowed to decay no more than this percent of r = 0 value (0.01=1%)
+1            !    time integration (0=bdf/ext Nek5000, 1=rk3 CMT-nek, 2=other)
+0 ---------- ! X-boundary condition lower (0=periodic, 1=outflow, -1=inflow)
+0            ! X-boundary condition upper
+0            ! Y-boundary condition lower 
+0            ! Y-boundary condition upper
+0            ! Z-boundary condition lower 
+0            ! Z-boundary condition upper
+1 ---------- !    two-way coupling (0=off, 1=on)
+0            ! reduced Barycentric interpolation (0=full, (lx1+1)/2=reduced)
+1 ---------- !    force user specified (0=off, 1=on)
+1            !    force quasi-steady (0=off, -1=on w/o corrections, 1=on)
+0            !    force undisturbed
+0            !    force inviscid unsteady
+0 ---------- ! delay particles until this timestep
+0            !    inject particles at this interval number of timesteps (if bc=inflow)
+0            ! restart particles from this step (0=no restart) NEED TO RECODE, NOT IN USE
+25.          !    particle density 
+1.84113E-3   ! dynamic viscosity used in stokes drag and particle timescale
+0.6          !    desired initial volume fraction in region distributed

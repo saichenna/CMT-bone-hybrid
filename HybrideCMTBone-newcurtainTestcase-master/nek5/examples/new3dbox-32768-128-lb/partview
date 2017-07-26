@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# use the command ./partview filebase nw nf ldim
+#     where: 
+#          $1  -filebase: could be partxyz, partuvw, etc.
+#          $2  -nf:       number of files you want output
+#                             -
+#     
+
+varnum=4
+
+for (( i=0; i<=$2; i++ ));                               # loop over all files
+do
+	printf -v thisit "%05d" $i                       # this timestep (integer)
+        printf -v datfile "%s%05d" "partdata" $i         # name of datafile at this timestep (string)
+        printf -v file "%s%05d%s" "partxyz" $i ".3D"
+        printf -v nfile "%s%05d%s" "npartxyz" $i ".3D"
+
+        nw=$(sed -n '1p' $datfile)                       # get number of particles
+        nw="$(echo -e "${nw}" | tr -d '[[:space:]]')"
+
+	echo "*-*-* reading $file with $nw particles, property: $3 *-*-*"
+
+        # convert binary to asci file (\ is an escape character)
+	echo "#!/bin/bash" > sub && chmod +x sub
+	echo "hexdump -v -e '1/8 \"%10.5f \"' -e '\"\n\"' $file > testtmp" > sub
+ 	./sub && rm sub
+
+        awk -v n=4 '{ row = row $1 " "; if (NR % n == 0) { print row; row = "" } }' testtmp > tmp2
+        awk -v vnum=$varnum '{print $1, $2, $3, $vnum}' tmp2 > $nfile 
+        sed -i "1i X Y Z MYVAR" $nfile        # add header for visit
+done
+
+rm testtmp tmp2

@@ -1,0 +1,162 @@
+ ****** PARAMETERS *****
+    2.610000     NEKTON VERSION
+  3  DIMENSIONAL RUN
+          103 PARAMETERS FOLLOW
+   1.00000         DENSIT Y  p1
+  1.e-31           VISCOS    p2
+  0.000000E+00     BETAG     p3
+  0.000000E+00     GTHETA    p4
+  0.000000E+00     PGRADX    p5
+  0.000000E+00     FLOWRATE  p6
+   1.00000         RHOCPA    p7
+  0.0100000         CONDUCT  p8
+  0.000000E+00     QVOL      p9
+  0.000000E+00     FINTIME   p10
+  250000.0         NSTEPS    p11
+  1.000000E-05     DT       p12
+  0.000000E+00     IOCOMM    p13
+  0.000000E+00     IOTIME    p14
+  5.0E+00     IOSTEP         p15
+  0.000000E+00     EQTYPE    p16
+  0.000000E+00     AXIS      p17
+  0.250000E-01     GRID      p18
+  -1.00000         INTYPE    p19
+   12.0000         NORDER    p20
+  0.100000E-13     DIVERGENCE p21
+  0.100000E-14     HELMHOLTZ  p22
+  0              p23 NPSCAL
+  0.100000E-09     TOLREL     p24
+  0.100000E-09     TOLABS     p25
+  0.400000         COURANT, var. timestp only works with rk3 not bdf in cmtnek p26
+   2.00000         TORDER        p27
+  0.000000E+00     TMESH         p28
+  0.000000E+00     MAXCGHELM     p29
+  0.000000E+00     PoPRESSURE    p30
+  0.000000E+00     GAS CONS R    p31
+  0.000000E+00     Lo Ma GRAV    p32
+   100.000         MXGEOM        p33
+   100.000         MAXNEW        p34
+  0.100000E-03                   p35
+  0.100000E-03     XMAGNET       p36
+  0.100000E-01     NGRIDS        p37
+  0.000000E+00     NORDER2       p38
+  0.000000E+00     NORDER3       p39
+  0.000000E+00     NORDER4       p40
+  0.000000E+00     NORDER5       p41
+  0.000000E+00     SSFSLENG      p42
+   1.00000         VHScaleFac    p43
+  0.000000E+00     POISSONRA     p44
+  0.000000E+00     FSDTFAC       p45
+  0.000000E+00     IRSTART       p46
+  0.000000E+00     CNFAC         p47
+  0.000000E+00     PGEOM         p48
+  0.140000         MIXLFAC       p49
+  0.000000E+00     MAXCGFS       p50
+  0.000000E+00                   p51
+  0.000000E+00     HISTEP        p52
+  0.000000E+00     HISTIME       p53
+  0.000000E+00     RAMP_STEPS    p54
+  0.000000E+00                   p55
+  0.000000E+00                   p56
+  0.000000E+00                   p57
+  0.000000E+00                   p58
+  0.000000E+00                   p59
+  0.000000E+00                   p60
+  0.000000E+00                   p61
+  0.000000E+00                   p62
+  0.000000E+00                   p63
+  0.000000E+00                   p64
+   1.00000         new file each dump (1)                   p65
+  4.000000E+00     write form (0), unform(1), universal(2)  p66
+  4.000000E+00     read form (0), unform (1), universal(2)  p67
+  0.000000E+00                            p68
+   50000.0         frequency of srf dump  p69
+  0.000000E+00                            p70
+  0.000000E+00                            p71
+  0.000000E+00                            p72
+  0.000000E+00                            p73
+  0.000000E+00                            p74
+  0.000000E+00                            p75
+  0.000000E+00                            p76
+  0.000000E+00                            p77
+  0.000000E+00                            p78
+  0.000000E+00                            p79
+  0.000000E+00                            p80
+  0.000000E+00                            p81
+  0.000000E+00                            p82
+  0.000000E+00                            p83
+  0.000000E+00                            p84
+  0.000000E+00                            p85
+  0.000000E+00                            p86
+  0.000000E+00                            p87
+  0.000000E+00                            p88
+  0.000000E+00       coarse grid weighting (default=10.0) p89
+  0.000000E+00                            p90
+  0.000000E+00                            p91
+  0.000000E+00                            p92
+ 0  80.0000          Number of pressure solns saved              p93
+ 0  3.00000          start saving pressure solns after this      p94
+ 0  5.00000          start saving pressure solns after this      p95
+ 0 0.000000E+00       which saving algorithm 1 = discard, 2=     p96
+ 0 0.000000E+00       0 == > no iterative refinement             p97
+  0.000000E+00       0 = Bnorm, 1=1norm, 2=B^2 norm,             p98
+ 0 1.00000           No. of ON                                   p99
+  0.000000E+00       Turn off overlapp. Schw. for splitting      p100
+  0.000000E+00       No. of pdumps                               p101
+   1.00000           Dump out divergence at each time step       p102
+  0.000000E-01       weight of filter                            p103
+      4  Lines of passive scalar data follows2 CONDUCT; 2RHOCP
+   1.00000       1.00000       1.00000       1.00000       1.00000
+   1.00000       1.00000       1.00000       1.00000
+   1.00000       1.00000       1.00000       1.00000       1.00000
+   1.00000       1.00000       1.00000       1.00000
+           13  LOGICAL SWITCHES FOLLOW
+  T     IFFLOW
+  F     IFHEAT
+  T     IFTRAN
+  T T F F F F F F F F F IFNAV & IFADVC (convection in P.S. fields)
+  F F T T T T T T T T T T IFTMSH (IF mesh for this field is T mesh)
+  F     IFAXIS
+  F     IFSTRS
+  F     IFSPLIT
+  F     IFMGRID
+  F     IFMODEL
+  F     IFKEPS
+  F     IFMVBD
+  F     IFCHAR
+   8.00000       8.00000     -0.500000      -4.00000     XFAC,YFAC,XZERO,YZERO
+ **MESH DATA** 1st line is X of corner 1,2,3,4. 2nd line is Y.
+       -1000  3        1000           NEL,NDIM,NELV
+            0 PRESOLVE/RESTART OPTIONS  *****
+            7         INITIAL CONDITIONS *****
+C Default
+C Default
+C Default
+C Default
+C Default
+C Default
+C Default
+  ***** DRIVE FORCE DATA ***** BODY FORCE, FLOW, Q
+            4                 Lines of Drive force data follow
+C
+C
+C
+C
+  ***** Variable Property Data ***** Overrrides Parameter data.
+            1 Lines follow.
+            0 PACKETS OF DATA FOLLOW
+  ***** HISTORY AND INTEGRAL DATA *****
+            0   POINTS.  Hcode, I,J,H,IEL
+  ***** OUTPUT FIELD SPECIFICATION *****
+            6 SPECIFICATIONS FOLLOW
+  F      COORDINATES
+  T      VELOCITY
+  T      PRESSURE
+  T      TEMPERATURE
+  F      TEMPERATURE GRADIENT
+            0      PASSIVE SCALARS
+  ***** OBJECT SPECIFICATION *****
+       0 Surface Objects
+       0 Volume  Objects
+       0 Edge    Objects
+       0 Point   Objects
