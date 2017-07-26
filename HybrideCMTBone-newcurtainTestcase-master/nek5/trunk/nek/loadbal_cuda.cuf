@@ -28,6 +28,7 @@
           include 'INPUT.cuf'
           include 'PARALLEL.cuf'
           include 'TSTEP.cuf'
+          include 'CMTDATA.cuf'
 
 !         parameter (lr=16*ldim,li=5+6)
           common /nekmpi/ nid_,np_,nekcomm,nekgroup,nekreal
@@ -42,14 +43,14 @@
           common /elementrange/ xerange
 
           integer newgllnid(lelg), trans(3, lelg), trans_n, psum(lelg)
-          integer e,eg,eg0,eg1,mdw,ndw
+          integer e,eg,eg0,eg1,mdw,ndw, key
           integer ntuple, i, el, delta, nxyz
 !         common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
 !                     ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
 !                     ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
 !         common  /cparti/ ipart(li,lpart)
 !         common  /iparti/ n,nr,ni
-          integer particleMap(3, lelt)
+          integer particleMap(3, lelg)
           real ratio
           !include TSTEP1 to include TIME
           COMMON /TSTEP1/ TIME,TIMEF,FINTIM,TIMEIO &
@@ -70,7 +71,9 @@
 !             call printi(pload, nelgt)
 !         endif
 !         Step 1: Send number of particles in each element to Processor 0.
+          call nekgsync()
           nxyz = nx1*ny1*nz1   !total # of grid point per element
+          nw = 32768*3
           delta = ceiling(nw*1.0/nelgt)
           ratio = 1.0   
           ntuple = nelt
@@ -112,33 +115,7 @@
           call crystal_ituple_transfer(cr_h,particleMap, &
                                       mdw,ntuple,ndw,key)
 
-!         print *, 'in gpu code'
-!         Step 2: Processor 0 sorts the elements according to global element id
-!                 Processor 0 also assigns new gllnid
-!         if (nid .eq. 0) then
-!            key=1
-!            nkey = 1
-!            call crystal_ituple_sort(cr_h,particleMap,mdw, &
-!                                    ntuple,key,nkey)
-!            do i=1,ntuple ! ntuple changed to toal number of elements after tuple transfer
-!               pload(i) = particleMap(3, i)
-!            enddo
-
-!            print *, 'new pload:'
-!            call printi(pload, nelgt)
-!            !print *, 'new pload/n'
-!            !call printr(newPload, lelt)
-!            call izero(psum, lelg)
-!            call preSum(pload, psum, nelgt)
-!            print *, 'recompute_partitions: psum(nelgt): ', psum(nelgt)
-!            !call printr(newPload, lelt)
-
-!            !print *, 'print new gllnid'
-!            call izero(newgllnid, lelg)
-!            call ldblce(psum, nelgt, newgllnid, np_)
-!            !call printi(newgllnid, lelt)
-!         endif
-          call bcast(newgllnid,4*lelg)
+          call bcast(newgllnid,4*nelgt)
 
           call izero(trans, 3*lelg)
           call track_elements(gllnid, newgllnid, nelgt, trans, &
@@ -149,9 +126,11 @@
 ! 110  continue
 
           print *, "finished track elements in processor", nid
-          call track_particles(trans, trans_n)
+!         call track_particles(trans, trans_n)
+          call nekgsync()
 !         call mergePhigArray_gpu(newgllnid, trans, trans_n)
 !         call mergeUArray_gpu(newgllnid)
+!         print *, 'lx1, ly1', nid, lx1, ly1, lz1, toteq
           istate = cudaMemcpy(phig,d_phig,lelt*lx1*ly1*lz1,&
               cudaMemcpyDevicetoHost)
           call mergeArray(phig, lx1*ly1*lz1, lelt, newgllnid, 1)
@@ -338,7 +317,8 @@
           index_n=1;
           nl=0
           nxyz = lx1*ly1*lz1
-          istate = cudaMemcpy(phig,d_phig,nelt*lx1*ly1*lz1, cudaMemcpyDevicetoHost)
+          istate = cudaMemcpy(phig,d_phig,nelt*lx1*ly1*lz1, &
+           cudaMemcpyDevicetoHost)
           do i=1, nelt
               ieg = lglel(i)
               if ((gllnid(ieg) .eq. nid) .and. &
@@ -448,7 +428,8 @@
                 enddo
              enddo
           enddo
-          istate = cudaMemcpy(d_phig,phig,phig_n*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
+          istate = cudaMemcpy(d_phig,phig,phig_n*lx1*ly1*lz1, &
+             cudaMemcpyHosttoDevice)
        print *, "Update phig array: phig_n", phig_n
        end
 !------------------------------------------------------------------
@@ -473,7 +454,8 @@
           trans_n=0
           nxyz = lx1*ly1*lz1*toteq
           nl=0
-          istate = cudaMemcpy(u,d_u,nelt*toteq*lx1*ly1*lz1,cudaMemcpyDevicetoHost)
+          istate = cudaMemcpy(u,d_u,nelt*toteq*lx1*ly1*lz1, &
+             cudaMemcpyDevicetoHost)
           do i=1, nelt
               ieg = lglel(i)
               if ((gllnid(ieg) .eq. nid) .and. &
@@ -584,7 +566,8 @@
                       enddo
                   enddo
               enddo
-       istate = cudaMemcpy(d_u,u,u_n*toteq*lx1*ly1*lz1,cudaMemcpyHosttoDevice)
+       istate = cudaMemcpy(d_u,u,u_n*toteq*lx1*ly1*lz1, &
+         cudaMemcpyHosttoDevice)
        print *, "Update u array: u_n", u_n
        end
 
@@ -618,8 +601,10 @@
          ipart(je0, ip) = gllel(e) - 1  ! je0 start from 0
       enddo
 !     Sort by element number 
+      if(n .gt. 0) then
       call crystal_tuple_sort(i_cr_hndl,n &
                , ipart,ni,partl,nl,rpart,nr,je0,1)
+      endif
       istate = cudaMemcpy(d_rpart,rpart,nr*n,cudaMemcpyHosttoDevice)
       istate = cudaMemcpy(d_ipart,ipart,ni*n,cudaMemcpyHosttoDevice)
 

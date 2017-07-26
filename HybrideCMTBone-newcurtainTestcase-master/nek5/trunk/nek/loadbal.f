@@ -71,73 +71,128 @@ c  50  continue
 c--------------------------------------------------------
 c     assign to corresponding processor, limit the number of element
 c     assigned to each processor
-      subroutine ldblce_limit(psum, len, gllnid, np)
+      subroutine ldblce_limit(psum, len, gllnid, np) !not yet include limit lelt
          include "SIZE"
+         include "INPUT"
          integer psum(len)
          integer np
          integer gllnid(len)
 
          integer i,j, k, flag, ne
          integer pos(np+1)  !pos(i)-pos(i+1)-1 belong to processor i-1
-         real diff, diffn, thresh
-         i=1
-         flag = 0
-         thresh=psum(len)*1.0/np*i
-         call izero(pos, np+1)
-         pos(1)=1
-         ne = 0
-         do 70 j=2, len
-            diff=abs(thresh-psum(j-1))
-            diffn=abs(thresh-psum(j))
-            if(diff .ge. diffn) then
-               !write(*,*) "i:", i, "pos(i):", pos(i)
-               ! bring in lelt
-               ne=ne+1 
-               if (ne > lelt-1) then
-                   print *,i, "Number of elements",
-     $              "exceeds lelt = ", lelt
-                   pos(i+1)=j
-                   ne = 0
-                   i = i + 1
-                   thresh=psum(len)*1.0/np*i
-               else 
-                   pos(i+1)=j+1
-               endif
-            else
-               pos(i+1)=j
-               !write(*,*) "i/:", i, "pos(i):", pos(i)
-               i=i+1
-               thresh=psum(len)*1.0/np*i
-               ne = 0
-            endif
-  70      continue
-c         print *, 'prefix sum, len: ', len
-c         call printi(psum, len)
-c         print *, ' i', i
-          !call printi(pos, np+1)
-          if( i .lt. np) then ! this part is for the partition less than np
-              do k = i+2, np+1
-                 pos(k) = len + 1
-              enddo
-          endif 
-c         print *, 'printing pos'
-c         call printi(pos, np+1)
-c         do i=1, np+1  !verify loadbal
-c            print *,'pos:', i, pos(i)
-c         enddo 
+         real diff, diffn, thresh(np)
+         integer num_cores, numgpu
+         real percentCPULoad, threshNode, threshProc, threshi
 
-c         print *, 'load of p', 0, psum(pos(2)-1)
-c    $                 ,pos(1), pos(1+1)-1    
-          do 80 i=1, np
-c            print *, 'load of p', i-1, psum(pos(i+1)-1)-psum(pos(i)-1)
-c    $                 ,pos(i), pos(i+1)-1    
-             do 90 j=pos(i), pos(i+1)-1
-                gllnid(j)=i-1
-  90         continue
-  80      continue
-c         print *, 'printing gllnid, length: ',len 
-c         call printi(gllnid, len)
-          
+         call rzero(thresh, np)
+         call izero(pos, np+1)
+         num_cores = param(70) ! #of cores in each node
+         percentCPULoad = 1-param(71)
+         numgpu = np /num_cores   ! #of nodes
+         threshNode = psum(len)*1.0/numgpu  ! the load for each node
+         threshProc = threshNode * percentCPULoad/ (num_cores - 1) ! the load for cpu
+         print *, 'psum ldblce', num_cores, numgpu, threshNode
+     $    , threshProc, psum(1), len
+c        compute thresh array
+         if(num_cores>1) then !hybrid of cpu and gpu
+             thresh(1)=threshProc
+         else
+             thresh(1) = threshNode
+         endif
+         do i = 2, np
+             if(mod(i,num_cores) .eq. 0) then !GPU
+                thresh(i) = threshNode * (i/num_cores);
+             else
+                thresh(i) = thresh(i-1)+threshProc
+             endif
+         enddo
+
+c      assign gllnid
+c      Step 1: divide psum into numgpu parts, assign pos(i*num_cores)
+       k = 1
+       pos(1) = 0
+       do i = 1, numgpu
+          threshi = thresh(i*num_cores)
+          ne = 0
+          do j = k, len-1
+             if(abs(psum(j)-threshi) .lt. abs(psum(j+1)-threshi)) then
+                   pos(i*num_cores+1) = j
+                   k = j
+                   exit
+             else
+                ne = ne + 1
+                if(ne .gt. lelt*num_cores-1) then
+                   print *,j, "Number of elements",
+     $              "exceeds lelt = ", lelt
+                   pos(i*num_cores+1) = j
+                   ne = 0
+                   k = j
+                   exit
+                else
+                   pos(i*num_cores+1) = j+1
+                   k = j+1
+                endif
+             endif
+          enddo
+       enddo
+       print *, 'pos: ', pos
+
+c     Step 2: assign the rest of pos
+      do i = 1, numgpu
+         k = i*num_cores - 1
+         threshi = thresh(k)
+         do j = pos(i*num_cores+1)-1, pos((i-1)*num_cores+1)+1, -1
+            if(abs(psum(j+1)-threshi) .lt. abs(psum(j)-threshi)) then
+                if (pos(k+2) - (j+1) .le. lelt) then
+                   pos(k+1) = j+1
+                else
+                   pos(k+1) = pos(k+2) - lelt
+                   print *, j, "Number of elements",
+     $              "exceeds lelt = ", lelt
+                endif
+                if((k .gt. (i-1)*num_cores+1)) then
+                   k = k - 1
+                   threshi = thresh(k)
+                   if(j .eq. pos((i-1)*num_cores+1)+1) then ! this part is the same as the next else part, since i lost j .eq. pos((i-1)*num_cores+1)+1 situation
+                      if(abs(psum(j) - threshi) <threshProc) then
+                          pos(k+1) = j
+                      else
+                          pos(k+1) = j+1
+                      endif
+                   endif
+                else
+                   exit
+                endif
+            else
+                if(j .eq. pos((i-1)*num_cores+1)+1) then
+                   if(abs(psum(j) - threshi) <threshProc) then
+                       if (pos(k+2) - j .le. lelt) then
+                          pos(k+1) = j
+                       else
+                          pos(k+1) = pos(k+2) - lelt
+                          print *, j, "Number of elements",
+     $                      "exceeds lelt = ", lelt
+                       endif
+                   endif
+                endif
+            endif
+         enddo
+      enddo
+      print *, 'pos: ', pos
+
+c     Step 3: eleminate 0 in pos(2:np+1)
+      do i=2, np+1
+         if (pos(i) .eq. 0)  pos(i) = pos(i-1)
+      enddo
+      print *, 'pos: ', pos
+
+c     Step 4: assign gllnid 
+      do i=1, np
+          do j=pos(i)+1, pos(i+1)
+             gllnid(j)=i-1
+          enddo
+      enddo
+
       return
       end
 c--------------------------------------------------------
@@ -487,6 +542,7 @@ c         endif
           call nekgsync()
           starttime = dnekclock()
           nxyz = nx1*ny1*nz1   !total # of grid point per element
+          nw = 32768*3
           delta = ceiling(nw*1.0/nelgt)
           ratio = 1.0
           ntuple = nelt
@@ -577,16 +633,18 @@ c                print *, '# gas element on', i-1, 'is: ', gaselement(i)
 c            enddo
           endif
           call bcast(newgllnid,4*nelgt)
+c         if (nid .eq.0) print *, "passed bcast" 
 
           call izero(trans, 3*lelg)
           call track_elements(gllnid, newgllnid, nelgt, trans, 
      $                               trans_n, lglel)
+c         if (nid .eq.0) print *, "passed track_elements" 
 c         print *, 'print trans'
 c         do 110 i=1, trans_n
 c           print *, 'trans', trans(1, i), trans(2, i), trans(3, i)
 c 110  continue
 
-          call track_particles(trans, trans_n)
+c         call track_particles(trans, trans_n)
           call nekgsync()
           endtime = dnekclock()
           if( mod(nid, np/2) .eq. np/2-2 .or. nid .eq. 0) then
@@ -896,8 +954,10 @@ c    >                ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
          ipart(je0, ip) = gllel(e) - 1  ! je0 start from 0
       enddo
 c     Sort by element number
+      if(n .gt. 0) then
       call crystal_tuple_sort(i_cr_hndl,n
      $          , ipart,ni,partl,nl,rpart,nr,je0,1)
+      endif 
 
       end
 c----------------------------------------------------------------------
