@@ -4,7 +4,7 @@
 
 # source path 
 #SOURCE_ROOT="/ccs/home/kekezhai/CMTHybrid/CMTHybrid_works/nek5/trunk/nek"
-SOURCE_ROOT="/ccs/home/kekezhai/CMTHybrid/CMTHybrid-LB-newcurtain/nek5/trunk/nek"
+SOURCE_ROOT="/ccs/proj/csc188/titan/CMT-bone-hybrid/HybrideCMTBone-newcurtainTestcase-master/nek5/trunk/nek"
 #"/cise/research/hpc/tmishra/hybrid/paper/paper/hybrid/fortran/cmtbone2/nek5/trunk/nek"
 #SOURCE_ROOT="/ccs/home/tania/cmtbone2/nek5/trunk/nek"
 SOURCE_ROOT2="$SOURCE_ROOT/cmthybrid" 
