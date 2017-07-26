@@ -1,16 +1,16 @@
-### makefile automatically created by makenek 07/08/2017 16:25:12 ###
+### makefile automatically created by makenek 07/26/2017 12:18:05 ###
 BINNAME=nek5000
 LIBNAME=libnek5000.a
-CASENAME:=box
-CASEDIR:=/lustre/atlas/scratch/kekezhai/csc188/bone-newcurtainTestcase/3dbox-32768-128-lb
-S:=/ccs/home/kekezhai/CMTHybrid/CMTHybrid-LB-newcurtain/nek5/trunk/nek
-S2:=/ccs/home/kekezhai/CMTHybrid/CMTHybrid-LB-newcurtain/nek5/trunk/nek/cmthybrid
+CASENAME:=b3d
+CASEDIR:=/ccs/proj/csc188/titan/CMT-bone-hybrid/HybrideCMTBone-newcurtainTestcase-master/nek5/examples/new3dbox-32768-128-lb
+S:=/ccs/proj/csc188/titan/CMT-bone-hybrid/HybrideCMTBone-newcurtainTestcase-master/nek5/trunk/nek
+S2:=/ccs/proj/csc188/titan/CMT-bone-hybrid/HybrideCMTBone-newcurtainTestcase-master/nek5/trunk/nek/cmthybrid
 J:=$S/jl
 OPT_INCDIR:=.
 MPI_INC:=/usr/include/mpich
 OBJDIR=obj
 IFMPI:=true
-IFCMT:=true
+IFCMT:=false
 IFAMG:=false
 IFAMG_DUMP:=false
 IFNEKNEK:=false

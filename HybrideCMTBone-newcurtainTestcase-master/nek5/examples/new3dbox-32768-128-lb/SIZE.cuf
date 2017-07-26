@@ -11,14 +11,14 @@
 
       ! GENERAL
       parameter (ldim=3)        ! domain dimension
-      parameter (lx1=5)        ! polynomial order; in 2D set lz1=1
-      parameter (lxd=6)        ! polynomial order for over-integration 
+      parameter (lx1=7)        ! polynomial order; in 2D set lz1=1
+      parameter (lxd=13)        ! polynomial order for over-integration 
       parameter (lx2=lx1)       ! polynomial order for pressure
       parameter (lx1m=1)        ! polynomial order mesh solver; =1 no mesh motion
 
-      parameter (lelg=138240)     ! max total number of elements
-      parameter (lp=32768)       ! max number of MPI ranks
-      parameter (lelt=8192)       ! max number of elements per MPI rank 
+      parameter (lelg=64000)     ! max total number of elements
+      parameter (lp=65536)       ! max number of MPI ranks
+      parameter (lelt=600)       ! max number of elements per MPI rank 
       parameter (ldimt=4)       ! max number of auxiliary fields (temperature + scalars)
 
       ! OPTIONAL
@@ -35,24 +35,24 @@
       parameter (maxobj=4,maxmbr=lelt*6)        ! max number number of objects
       parameter (nsessmax=1,nmaxl=1,nfldmax=1,nmaxcom=1) ! multimesh parameters
 
-      parameter (llpart=75000) ! max number of particles per mpi rank
+      parameter (llpart=300000) ! max number of particles per mpi rank
 
       ! INTERNALS
       include 'SIZE.inc.cuf'
 
 ! automatically added by makenek
-!     parameter(lxo   = lx1) ! max output grid size (lxo>=lx1)
+!      parameter(lxo   = lx1) ! max output grid size (lxo>=lx1)
 
 ! automatically added by makenek
-!     parameter (lxs=1,lys=lxs,lzs=(lxs-1)*(ldim-2)+1) !New Pressure Preconditioner
+!      parameter (lxs=1,lys=lxs,lzs=(lxs-1)*(ldim-2)+1) !New Pressure Preconditioner
 
 ! automatically added by makenek
-!     parameter (lfdm=0)  ! == 1 for fast diagonalization method
+!      parameter (lfdm=0)  ! == 1 for fast diagonalization method
 
 ! automatically added by makenek
-!     common/IOFLAG/nio  ! for logfile verbosity control
+!      common/IOFLAG/nio  ! for logfile verbosity control
 
 ! automatically added by makenek
       integer lelcmt
-      parameter(lelcmt = lelt  ) ! # of cmt elements 
-! IFCMT=TRUE  then lelcmt=lelt
+      parameter(lelcmt = 1  ) ! # of cmt elements 
+! IFCMT=FALSE  then lelcmt=1

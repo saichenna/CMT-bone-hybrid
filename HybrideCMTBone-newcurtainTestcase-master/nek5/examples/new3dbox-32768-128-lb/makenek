@@ -3,24 +3,20 @@
 # Nek5000 build file
 #-------------------------------------------------------------------------------
 
-<<<<<<< HEAD
 # source path 
 #SOURCE_ROOT="/ccs/home/kekezhai/CMTHybrid/CMTHybrid_works/nek5/trunk/nek"
 SOURCE_ROOT="/ccs/proj/csc188/titan/CMT-bone-hybrid/HybrideCMTBone-newcurtainTestcase-master/nek5/trunk/nek"
 #"/cise/research/hpc/tmishra/hybrid/paper/paper/hybrid/fortran/cmtbone2/nek5/trunk/nek"
 #SOURCE_ROOT="/ccs/home/tania/cmtbone2/nek5/trunk/nek"
 SOURCE_ROOT2="$SOURCE_ROOT/cmthybrid" 
-=======
-# installation path 
-SOURCE_ROOT="$HOME/libraries/bitbucket/ufccmt/Nek5000"
->>>>>>> 9fedf4b5cbae66ba9d118a26472e9a9ae2112e01
 
 # Fortran/C compiler
-F77="mpixlf77"
-CC="mpixlc"
+F77="ftn -mcmodel=medium"
+CC="cc"
+NVCC="nvcc"
 
 # pre-processor list (set to "?" to get a list of available symbols)
-PPLIST="CMTNEK EXTBAR MPIIO" 
+#PPLIST="CMTNEK EXTBAR MPIIO" 
 
 # generic compiler flags
 #G="-g"
@@ -53,26 +49,21 @@ PPLIST="CMTNEK EXTBAR MPIIO"
 #VISIT_STOP=true
 
 # paths
-SOURCE_ROOT_CORE="$SOURCE_ROOT/core"
-SOURCE_ROOT_JL="$SOURCE_ROOT/jl"
-SOURCE_ROOT_CMT="$SOURCE_ROOT/core/cmt"
+#SOURCE_ROOT_CORE="$SOURCE_ROOT/core"
+#SOURCE_ROOT_JL="$SOURCE_ROOT/jl"
+#SOURCE_ROOT_CMT="$SOURCE_ROOT/core/cmt"
 
 ###############################################################################
 # DONT'T TOUCH WHAT FOLLOWS !!!
 ###############################################################################
-set -e
-# assign version tag
-mver=17.0.0
+mver=1
 # overwrite source path with optional 2nd argument
 if [ -d $2 ] && [ $# -eq 2 ]; then
   SOURCE_ROOT="$2"
   echo "change source code directory to: ", $SOURCE_ROOT
-  SOURCE_ROOT_CORE="$SOURCE_ROOT/core"
-  SOURCE_ROOT_JL="$SOURCE_ROOT/jl"
-  SOURCE_ROOT_CMT="$SOURCE_ROOT/core/cmt"
 fi
 # do some checks and create makefile
-source $SOURCE_ROOT_CORE/makenek.inc
+source $SOURCE_ROOT/makenek.inc.cmthybrid
 # compile
 make -j4 -f makefile 2>&1 | tee compiler.out
 exit 0

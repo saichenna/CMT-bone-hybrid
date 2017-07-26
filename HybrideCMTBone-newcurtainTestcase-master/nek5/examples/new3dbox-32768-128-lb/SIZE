@@ -18,7 +18,7 @@ c
 
       parameter (lelg=64000)     ! max total number of elements
       parameter (lp=65536)       ! max number of MPI ranks
-      parameter (lelt=100)       ! max number of elements per MPI rank 
+      parameter (lelt=600)       ! max number of elements per MPI rank 
       parameter (ldimt=4)       ! max number of auxiliary fields (temperature + scalars)
 
       ! OPTIONAL
@@ -39,3 +39,20 @@ c
 
       ! INTERNALS
       include 'SIZE.inc'
+
+c automatically added by makenek
+c      parameter(lxo   = lx1) ! max output grid size (lxo>=lx1)
+
+c automatically added by makenek
+c      parameter (lxs=1,lys=lxs,lzs=(lxs-1)*(ldim-2)+1) !New Pressure Preconditioner
+
+c automatically added by makenek
+c      parameter (lfdm=0)  ! == 1 for fast diagonalization method
+
+c automatically added by makenek
+c      common/IOFLAG/nio  ! for logfile verbosity control
+
+c automatically added by makenek
+      integer lelcmt
+      parameter(lelcmt = 1  ) ! # of cmt elements 
+c IFCMT=FALSE  then lelcmt=1

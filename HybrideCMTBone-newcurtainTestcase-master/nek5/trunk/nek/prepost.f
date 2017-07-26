@@ -68,22 +68,22 @@ c     Trigger history output only if prefix = 'his'   pff 8/18/05
       if (prefin.eq.'his') ifhis  = .true.
       if (prefix.eq.'his') prefix = '   '
 
-      if(icalld.eq.1) then
-        ierr = 0
-        if (nid.eq.0) then
-           write(6,*) 'schfile:',schfle
-           if (ifschclob) then
-              open(unit=26,file=schfle,err=44,form='formatted')
-           else
-              open(unit=26,file=schfle,err=44,form='formatted',
-     &             status='new')
-           endif
-           goto 45
-  44       ierr = 1
- 45     endif 
-        call err_chk(ierr,'.sch file already exists. Use IFSCHCLOB=F to
-     $disable this check BUT BEWARE!!!!!!$') 
-      endif
+c      if(icalld.eq.1) then
+c        ierr = 0
+c        if (nid.eq.0) then
+c           write(6,*) 'schfile:',schfle
+c           if (ifschclob) then
+c              open(unit=26,file=schfle,err=44,form='formatted')
+c           else
+c              open(unit=26,file=schfle,err=44,form='formatted',
+c     &             status='new')
+c           endif
+c           goto 45
+c  44       ierr = 1
+c 45     endif 
+c        call err_chk(ierr,'.sch file already exists. Use IFSCHCLOB=F to
+c     $disable this check BUT BEWARE!!!!!!$') 
+c      endif
  
       call prepost_map(0) ! map pr and axisymm. arrays
 
