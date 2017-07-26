@@ -480,16 +480,15 @@ c----------------------------------------------------------------------
       include 'CMTPART.cuf'
 
       real, device :: d_rpart(lr,lpart)
-      integer, device :: d_ipart(li,lpart)
       real, device :: d_xdrange(2,3)
       integer, device :: d_in_part(llpart)
       integer, device :: d_bc_part(6)    ! Need to allocate this somewhere
       if(n.gt.0) then
-         call update_particle_location_wrapper(d_rpart, d_ipart, d_xdrange,
-     >         d_in_part, d_bc_part, ndim, nr, ni, n, jx, jx1, jx2, jx3)
+         call update_particle_location_wrapper(d_rpart, d_xdrange,
+     >         d_in_part, d_bc_part, n, ndim, nr, jx, jx1, jx2, jx3)
          istate = cudaMemcpy(rpart,d_rpart,nr*n, &
                           cudaMemcpyDevicetoHost)
-         istate = cudaMemcpy(ipart,d_ipart,ni*n, &
+         istate = cudaMemcpy(in_part,d_in_part,n, &
                           cudaMemcpyDevicetoHost)
       endif
       nbc_sum = abs(bc_part(1)) + abs(bc_part(2)) +
@@ -497,7 +496,7 @@ c----------------------------------------------------------------------
      >          abs(bc_part(5)) + abs(bc_part(6)) ! all periodic, don't search
       if (nbc_sum .gt. 0) then
       ic = 0
-c     right now couldnt think of a way to parallelize this memory update operation due to synchronization problem
+c     right now couldn't think of a way to parallelize this memory update operation due to synchronization problem
 c     Need to talk to Dr.Tania and Dr.Ranka to see if there is a way to parallelize this
       do i=1,n
          if (in_part(i).eq.0) then
