@@ -52,19 +52,19 @@ __global__ void particles_in_nid(int *fptsmap, double *rfpts, int *ifpts, double
         }
         if(ie==nelt){
             //point is outside all elements
-            int old = atomicAdd(nfpts, 1);
-            if(old==lpart){
+            atomicAdd(nfpts, 1);
+            if(nfpts==lpart){
                 printf("error many moving particles\n");
                 return;
             }
-            fptsmap[old] = id+1;
+            fptsmap[nfpts] = id+1;
             //double * rfp = rfpts + old * nrf;
             //int * ifp = ifpts + old * nif;
             for(int i = 0 ; i < nrf; i++)
-                rfpts[old*nrf+i] = rpart[id*nr+i];
+                rfpts[nfpts*nrf+i] = rpart[id*nr+i];
 
             for(int i = 0 ; i < nif; i++)
-                ifpts[old*nif+i] = ipart[id*ni+i];
+                ifpts[nfpts*nif+i] = ipart[id*ni+i];
         }
     }
 
@@ -324,9 +324,9 @@ __global__ void usr_particles_forces_rk3(double *rpart, int n, int nr,int jvol,i
           }
         }
 
-__global__ void update_vel_and_pos_bdf(double *rpart, int n, int ndim, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd){
+__global__ void update_vel_and_pos_bdf(double *rpart, double *alpha, double *beta, int n, int ndim, int nr, int ju0, int ju1,int ju2, int ju3, int jv0, int jv1,int jv2,int jv3,int jx0,int jx1, int jx2, int jx3, int jtaup, int jf0){
   int id = blockIdx.x*blockDim.x+threadIdx.x;
-  double s;
+  double s,rhs,rhx;
   if(id < n*ndim){
     int i = id/ndim;
     int k = id%ndim;
@@ -353,7 +353,7 @@ __global__ void update_vel_and_pos_bdf(double *rpart, int n, int ndim, int nr,in
 }
 
 //----------
-__global__ void update_vel_and_pos_rk3(double *rpart, double *kv_stage_p, double *kx_stage_p, int n, int ndim, int nr,int jv0,int jv1,int jv2,int jv3,int ju0,int ju1,int ju2,int ju3, int jx0, int jx1, int jx2, int jx3, int jf0, int fmfac){
+__global__ void update_vel_and_pos_rk3(double *rpart, double *kv_stage_p, double *kx_stage_p, int n, int ndim, int nr, int stage, int fmfac, int jv0,int jv1,int jv2,int jv3,int ju0,int ju1,int ju2,int ju3, int jx0, int jx1, int jx2, int jx3){
     int id = blockIdx.x*blockDim.x+threadIdx.x;
 
     if(id < n*ndim){
@@ -409,7 +409,7 @@ __global__ void update_vel_and_pos_rk3(double *rpart, double *kv_stage_p, double
 // }
 
 
-extern "C" void particles_in_nid_wrapper_(int *fptsmap, double *rfpts, int *ifpts, double *rpart, int *ipart, double *xerange, int *nrf, int *nif, int *nfpts, int *nr, int *ni, int *n, int *lpart, int *nelt, int *jx, int *jy, int *jz,int *je0, int *jrc, int *jpt, int *jd, int *jr, int *nid){
+extern "C" void particles_in_nid_wrapper_(double *rpart, int *ipart, double *rfpts, int *ifpts, double *fptsmap, double *xerange, int *n, int *nr, int *ni, int *nrf, int *nif, int *nfpts, int *nid, int *lpart, int *nelt, int *jx, int *jy, int *jz,int *je0, int *jrc, int *jpt, int *jd, int *jr){
 
     float time;
     cudaEvent_t startEvent, stopEvent;
@@ -454,7 +454,7 @@ extern "C" void particles_in_nid_wrapper_(int *fptsmap, double *rfpts, int *ifpt
     int blockSize = 1024, gridSize;
     gridSize = (int)ceil((float)n[0]/blockSize);
     // printf ("print var %d %d %d\n", n[0], jx[0], jy[0]);
-    particles_in_nid<<<gridSize, blockSize>>>(d_fptsmap, d_rfpts, d_ifpts, d_rpart, d_ipart, d_xerange, nrf[0], nif[0], d_nfpts, nr[0], ni[0], n[0], lpart[0], nelt[0], jx[0]-1, jy[0]-1, jz[0]-1, je0[0]-1, jrc[0]-1, jpt[0]-1, jd[0]-1, jr[0]-1, nid[0]);
+    particles_in_nid<<<gridSize, blockSize>>>(d_rpart, d_ipart, d_rfpts, d_ifpts, d_fptsmap, d_xerange, n[0], nr[0], ni[0], nrf[0], nif[0], d_nfpts, nid[0], lpart[0], nelt[0], jx[0], jy[0], jz[0], je0[0], jrc[0], jpt[0], jd[0], jr[0]);
     if(inCPU){
         cudaMemcpy(ipart, d_ipart, n[0]*ni[0]*sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
@@ -756,7 +756,7 @@ extern "C" void usr_particles_forces_rk3_wrapper_(double *rpart, int* n, int* nr
 
 
 //---------------------------------------------------------
-extern "C" void update_vel_and_pos_bdf_wrapper_(double *rpart, int *n, int* nr,int* jvol,int* jrhop, int* jfusr, int* jf0,int* jrho,int* jfqs,int* ju0,int* jv0, int* ja, int* jdp, int* jre, int* jtaup, int* jcd){
+extern "C" void update_vel_and_pos_bdf_wrapper_(double *rpart, double *alpha, double *beta, int* n, int* ndim, int* nr, int* ju0, int* ju1,int* ju2, int* ju3, int* jv0, int* jv1,int* jv2,int* jv3,int* jx0,int* jx1, int* jx2, int* jx3, int* jtaup, int* jf0){
 
     float time;
     cudaEvent_t startEvent, stopEvent;
@@ -772,10 +772,45 @@ extern "C" void update_vel_and_pos_bdf_wrapper_(double *rpart, int *n, int* nr,i
     }
     else{
       d_rpart= rpart;
+      d_alpha = alpha;
+      d_beta = beta;
     }
     int blockSize = 1024, gridSize;
-    gridSize = (int)ceil((float)n[0]/blockSize);
-    update_vel_and_pos_bdf<<<gridSize, blockSize>>>
+    gridSize = (int)ceil((float)n[0]*ndim[0]/blockSize);
+    update_vel_and_pos_bdf<<<gridSize, blockSize>>>(d_rpart, d_alpha, d_beta,n[0],ndim[0],nr[0],ju0[0],ju1[0],ju2[0],ju3[0],jv0[0], jv1[0],jv2[0],jv3[0],jx0[0],jx1[0], jx2[0],jx3[0], jtaup[0], jf0[0])
+    if(inCPU){
+        cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
+        //free
+        cudaFree(d_rpart);
+    }
+
+    cudaEventRecord(stopEvent, 0);
+    cudaEventSynchronize(stopEvent);
+    cudaEventElapsedTime(&time, startEvent, stopEvent);
+}
+
+extern "C" void update_vel_and_pos_rk3_wrapper_(double *rpart, double *kv_stage_p, double *kx_stage_p, int* n, int* ndim, int* nr, int* stage, int* fmfac,int* jv0,int* jv1,int* jv2,int* jv3,int* ju0,int* ju1,int* ju2,int* ju3,int* jx0,int* jx1,int* jx2,int* jx3){
+
+    float time;
+    cudaEvent_t startEvent, stopEvent;
+    cudaEventCreate(&startEvent);
+    cudaEventCreate(&stopEvent);
+    cudaEventRecord(startEvent, 0);
+
+    bool inCPU = false;
+    double *d_rpart;
+    if(inCPU){
+      cudaMalloc(&d_rpart, n[0]*nr[0]*sizeof(double));
+      cudaMemcpy(d_rpart, rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyHostToDevice);
+    }
+    else{
+      d_rpart = rpart;
+      d_kv_stage_p = kv_stage_p;
+      d_kx_stage_p = kx_stage_p;
+    }
+    int blockSize = 1024, gridSize;
+    gridSize = (int)ceil((float)n[0]*ndim[0]/blockSize);
+    update_vel_and_pos_rk3<<<gridSize, blockSize>>>(d_rpart, d_kv_stage_p, d_kx_stage_p, n[0], ndim[0], nr[0], stage[0], fmfac[0], jv0[0], jv1[0], jv2[0],jv3[0], ju0[0], ju1[0], ju2[0],ju3[0],jx0[0], jx1[0], jx2[0], jx3[0])
     if(inCPU){
         cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
         //free

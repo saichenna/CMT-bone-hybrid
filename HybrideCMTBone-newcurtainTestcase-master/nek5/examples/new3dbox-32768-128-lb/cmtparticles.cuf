@@ -362,25 +362,29 @@ c      pttime(35) = pttime(35) + dnekclock() - ptdum(35)
       include 'CTIMER.cuf'
       include 'CMTPART.cuf'
 
-      real, device :: d_rpart(lr,lpart)
-      integer, device :: d_ipart(li,lpart)
-      integer, device :: d_fptsmap(lpart)
-      real, device :: d_rfpts(lrf,lpart)
-      integer, device :: d_ifpts(lif,lpart)
-      real, device :: d_xerange(2,3,lelt)
+!      real, device :: d_rpart(lr,lpart)
+!      integer, device :: d_ipart(li,lpart)
+!      integer, device :: d_fptsmap(lpart)
+!      real, device :: d_rfpts(lrf,lpart)
+!      integer, device :: d_ifpts(lif,lpart)
+!      real, device :: d_xerange(2,3,lelt)
+
+      print *,'Entering particles_in_nid_wrapper_'
 
       if(n.gt.0) then
-         call particles_in_nid_wrapper(d_fptsmap,d_rfpts,d_ifpts,d_rpart,  &
-             d_ipart,d_xerange,nrf,nif,nfpts,nr,ni,n,lpart,nelt,jx,jy,jz,  &
-             je0,jrc,jpt,jd,jr,nid)
+         call particles_in_nid_wrapper(d_rpart,d_ipart,d_rfpts,  &
+             d_ifpts, d_fptsmap,d_xerange,n,nr,ni,nrf,nif,nfpts, &
+             nid,lpart,nelt,jx,jy,jz,je0,jrc,jpt,jd,jr)
       endif
+
+      print *,'Exiting particles_in_nid_wrapper_'
 
       if(nfpts.gt.0) then
          istate = cudaMemcpy(ifpts,d_ifpts,lif*n, &
                         cudaMemcpyDevicetoHost)
          istate = cudaMemcpy(rfpts,d_rfpts,lrf*n, &
                         cudaMemcpyDevicetoHost)
-         istate = cudaMemcpy(fptsmap,d_fptsmap,n, &
+         istate = cudaMemcpy(ifptsmap,d_fptsmap,n, &
                         cudaMemcpyDevicetoHost)
       endif
 
@@ -479,18 +483,21 @@ c----------------------------------------------------------------------
       include 'CTIMER.cuf'
       include 'CMTPART.cuf'
 
-      real, device :: d_rpart(lr,lpart)
-      real, device :: d_xdrange(2,3)
+      integer in_part(llpart)
       integer, device :: d_in_part(llpart)
-      integer, device :: d_bc_part(6)    ! Need to allocate this somewhere
+      istate = cudaMemcpy(d_in_part,in_part,llpart,cudaMemcpyHostToDevice)
+
       if(n.gt.0) then
+         print *,'Entering update_particle_location_wrapper_'
          call update_particle_location_wrapper(d_rpart, d_xdrange,
      >         d_in_part, d_bc_part, n, ndim, nr, jx, jx1, jx2, jx3)
          istate = cudaMemcpy(rpart,d_rpart,nr*n, &
                           cudaMemcpyDevicetoHost)
          istate = cudaMemcpy(in_part,d_in_part,n, &
                           cudaMemcpyDevicetoHost)
+         print *,'Exiting update_particle_location_wrapper_'
       endif
+
       nbc_sum = abs(bc_part(1)) + abs(bc_part(2)) +
      >          abs(bc_part(3)) + abs(bc_part(4)) +
      >          abs(bc_part(5)) + abs(bc_part(6)) ! all periodic, don't search
@@ -509,7 +516,7 @@ c     Need to talk to Dr.Tania and Dr.Ranka to see if there is a way to parallel
       enddo
       n = ic
       endif
-
+      cudaFree(d_in_part)
       return
       end
 
@@ -527,22 +534,17 @@ c-----------------------------------------------------------------------
 
       common /point2gridc/ p2gc
       real   p2gc(lx1,ly1,lz1,lelt,4)
-      real, device :: d_rpart(lr,lpart)
-      integer, device :: d_ipart(li,lpart)
-      real, device :: d_vx(lx1,ly1,lz1,nelt)
-      real, device :: d_vy(lx1,ly1,lz1,nelt)
-      real, device :: d_vz(lx1,ly1,lz1,nelt)
-      real, device :: d_vtrans(lx1,ly1,lz1,lelt)
-      real, device :: d_t(lx1,ly1,lz1,lelt)
 
       nxyz = nx1*ny1*nz1;
 
       if (n.gt.0) then
+            print *,'Entering the interp_props_part_location_wrapper_'
             call interp_props_part_location_wrapper(d_rpart,d_ipart,d_vx,
      >            d_vy,d_vz,d_t,d_vtrans,rep,xgll,ygll,zgll,wxgll,wygll,
      >            wzgll,nx1r,nx1,nr,jr,nelt,ju0,je0,jtemp,jrho)
             istate = cudaMemcpy(rpart,d_rpart,nr*n, &
                              cudaMemcpyDevicetoHost)
+            print *,'Exiting the interp_props_part_location_wrapper_'
       endif
       return
       end
@@ -560,11 +562,7 @@ c--------------------------------------------------------------------------
 
       real uvel(0:2), vvel(0:2), pmass,pmassf
 
-      common /PARTRK3/ kv_stage_p, kx_stage_p
-      real kv_stage_p(llpart,4,ldim), kx_stage_p(llpart,4,ldim)
 c      real c_sound
-      real, device :: d_rpart(lr,lpart)
-      integer, device :: d_ipart(li,lpart)
 
       ! begin timer
       ptdum(12) = dnekclock()
@@ -573,17 +571,22 @@ c      real c_sound
 c      c_sound = 1000000.
 
       if (time_integ.eq.0) then ! BDF/EXT -----------------------------
-
-      call usr_particles_forces_bdf_wrapper()
-
+      print *,'Entering usr_particles_forces_bdf_wrapper_'
+      call usr_particles_forces_bdf_wrapper(d_rpart,n,nr,jvol,      &
+             jrhop,jfusr,jf0,jrho,jfqs,ju0,jv0,ja,jdp,jre,jtaup,jcd)
+      print *,'Exiting usr_particles_forces_bdf_wrapper_'
       elseif (time_integ.eq.1) then ! rk3 -----------------------------
-
-      call usr_particles_forces_rk3_wrapper()
-
+      print *,'Entering usr_particles_forces_rk3_wrapper_'
+      call usr_particles_forces_rk3_wrapper(d_rpart,n,nr,jvol,      &
+             jrhop,jfusr,jf0,jrho,jfqs,ju0,jv0,ja,jdp,jre,jtaup,jcd)
+      print *,'Exiting usr_particles_forces_rk3_wrapper_'
 
       elseif (time_integ.eq.2) then ! PIEP ----------------------------
 
       endif
+      istate = cudaMemcpy(rpart,d_rpart,ni*n, &
+                       cudaMemcpyDevicetoHost)
+
 
       ! end timer
       pttime(12) = pttime(12) + dnekclock() - ptdum(12)
@@ -604,15 +607,22 @@ c-----------------------------------------------------------------------
       ! begin timer
       ptdum(10) = dnekclock()
 
-      real, device :: d_rpart(lr,lpart)
-      real, device :: d_kv_stage_p(lpart,4,ldim)
-      real, device :: d_kx_stage_p(lpart,4,ldim)
       call get_bdf_ext_coefs(beta,alpha,times)
       jx0 = jx
-      call update_vel_and_pos_bdf_wrapper()
 
+      istate = cudaMemcpy(d_alpha,alpha,4, &
+                       cudaMemcpyHostToDevice)
+      istate = cudaMemcpy(d_beta,beta,4, &
+                      cudaMemcpyHostToDevice)
+      print *,'Entering update_vel_and_pos_bdf_wrapper_'
+      call update_vel_and_pos_bdf_wrapper(d_rpart, d_alpha, d_beta, &
+        n,ndim, nr, ju0, ju1,ju2, ju3, jv0, jv1, jv2, jv3, jx0,jx1, &
+        jx2, jx3, jtaup, jf0)
+      print *,'Exiting update_vel_and_pos_bdf_wrapper_'
+      istate = cudaMemcpy(rpart,d_rpart,ni*n, &
+                       cudaMemcpyDevicetoHost)
       ! end timer
-      pttime(10) = pttime(10) + dnekclo ck() - ptdum(10)
+      pttime(10) = pttime(10) + dnekclock() - ptdum(10)
 
       return
       end
@@ -638,8 +648,16 @@ c-----------------------------------------------------------------------
       jx0 = jx
       call get_bdf_ext_coefs(beta,alpha,times)
       fmfac = 1.0*dt/6.0
-      call update_vel_and_pos_rk3_wrapper()
-
+      call update_vel_and_pos_rk3_wrapper(d_rpart,
+        d_kv_stage_p, d_kx_stage_p, n, ndim, nr, stage, &
+        fmfac, jv0, jv1, jv2, jv3, ju0, ju1, ju2, ju3,
+        jx0, jx1, jx2, jx3)
+      istate = cudaMemcpy(rpart,d_rpart,ni*n, &
+                       cudaMemcpyDevicetoHost)
+      istate = cudaMemcpy(kv_stage_p,d_kv_stage_p,n*12, &
+                      cudaMemcpyDevicetoHost)
+      istate = cudaMemcpy(kx_stage_p,d_kx_stage_p,n*12, &
+                     cudaMemcpyDevicetoHost)
       ! end timer
       pttime(11) = pttime(11) + dnekclock() - ptdum(11)
 

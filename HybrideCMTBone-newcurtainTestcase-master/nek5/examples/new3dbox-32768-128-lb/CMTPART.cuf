@@ -5,9 +5,18 @@
 
 !     main common blocks - rpart and ipart --------------------------
       parameter (lr=77,li=10)
-      common  /cpartr/ rpart(lr,llpart) 
-      common  /cparti/ ipart(li,llpart) 
+      common  /cpartr/ rpart(lr,llpart)
+      common  /cparti/ ipart(li,llpart)
       common  /iparti/ n,nr,ni
+      real, device :: d_rpart(lr,llpart)
+      integer, device :: d_rpart(li,llpart)
+      common /PARTRK3/ kv_stage_p, kx_stage_p
+      real kv_stage_p(lpart,4,ldim), kx_stage_p(lpart,4,ldim)
+      real, device :: d_kv_stage_p(lpart,4,ldim),
+      real, device :: d_kx_stage_p(lpart,4,ldim)
+      real, device :: d_alpha(0:3)
+      real, device :: d_beta(0:3)
+
 
       common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jpid &
                         ,jai,nai,    jr,jd,jx,jy,jz,jv0,ju0,jf0,jfusr &
@@ -22,6 +31,7 @@
                            ipart_restart
       integer bc_part(6),two_way, red_interp,time_integ,part_force(4) &
             ,time_delay,nitspl,inject_rate,ipart_restart
+      integer, device :: d_bc_part(6)
 
 !     particle parameters -------------------------------------------
       common /part_paramsr/ deltaf, dp, deltax, rho_p, tau_p,mu_0, &
@@ -37,6 +47,16 @@
       real xgll(lx1), ygll(ly1), zgll(lz1), &
           wxgll(lx1), wygll(ly1), wzgll(lz1)
       integer nx1r
+      real, device :: d_xgll(lx1),d_ygll(ly1),d_zgll(lz1), &
+          d_wxgll(lx1), d_wygll(ly1), d_wzgll(lz1)
+
+
+!     gas parameters ------------------------------------------------
+      real, device :: d_vx(lx1,ly1,lz1,nelt)
+      real, device :: d_vy(lx1,ly1,lz1,nelt)
+      real, device :: d_vz(lx1,ly1,lz1,nelt)
+      real, device :: d_vtrans(lx1,ly1,lz1,lelt)
+      real, device :: d_t(lx1,ly1,lz1,lelt)
 
 !     ghost particles -----------------------------------------------
       parameter (lrgp=9,ligp=6)
@@ -60,10 +80,10 @@
                             el_corner_proc_map,el_corner_el_map
       common /neighbor_el_number/ el_face_num,el_edge_num,el_corner_num, &
                                  nfacegp, nedgegp, ncornergp
-      
+
 !     two-way coupled values on eulerian mesh -----------------------
       common /part_two_way/  ptw
-      real                   ptw(lx1,ly1,lz1,lelt,4) 
+      real                   ptw(lx1,ly1,lz1,lelt,4)
 
 !     some grid values used in force calculations -------------------
       common /fundpart/ rhs_fluidp(lx1,ly1,lz1,ldim,lelt) &
@@ -76,3 +96,6 @@
       common /fptsparti/ ifpts(lif,llpart),ifptsmap(llpart)
       common /fptspartn/ nfpts,nrf,nif
 
+      real, device :: d_rfpts(lrf,llpart)
+      integer, device :: d_ifpts(lif,llpart),d_ifptsmap(llpart),d_nfpts
+      real, device :: d_xerange(2,3,lelt)
