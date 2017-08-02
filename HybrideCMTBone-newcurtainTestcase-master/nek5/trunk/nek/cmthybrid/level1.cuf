@@ -1,7 +1,7 @@
 !-----------------------------------------------------------------------
 !     added by keke of module, for global variables
       module glbvariable
-       
+
       include 'SIZE.cuf'
       include 'CMTPART.cuf'
 !     parameter (lr=16*ldim,li=5+6)
@@ -67,7 +67,7 @@
 !     integer, device :: d_ipart(li,lpart)
       integer, device :: d_fptsmap(lpart)
       real, device :: d_rfpts(lrf,lpart)
-      integer, device :: d_ifpts(lif,lpart)	
+      integer, device :: d_ifpts(lif,lpart)
 
       real, device :: d_res3(lx1,ly1,lz1,toteq,lelt)
 !     real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
@@ -114,7 +114,7 @@
       real, device :: d_jaco_c(lelt*6*lx1*lz1)
 
 !------------------------------------------------------------
-!     the following is the copy of the previous to keep original one before change 
+!     the following is the copy of the previous to keep original one before change
 !       real, device :: d_res3(lx1,ly1,lz1,toteq,nelt)
 !!     real, device :: d_u(lx1,ly1,lz1,toteq,nelt)
 !      real, device :: d_res1(lx1,ly1,lz1,nelt,toteq)
@@ -201,9 +201,9 @@
                         d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
                         d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
                         d_uny,d_unz,d_cbc,d_all,d_jaco_c)
-         call process_gpu_particles(d_xdrange,d_xerange,d_rpart,d_ipart,&
-                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
-                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
+!         call process_gpu_particles(d_xdrange,d_xerange,d_rpart,d_ipart,&
+!                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
+!                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
          call prepost (.false.,'his')
          call in_situ_check()
          resetFindpts = 0
@@ -720,6 +720,7 @@
       starttime = dnekclock()
       if(istep.eq.1) call set_tstep_coef !- level2.txt
       if(istep.eq.1) call cmt_flow_ics(ifrestart) !- level2.txt
+      if(istep.eq.1) call usr_particles_init !- cmtparticles.cuf
       tmem1 = dnekclock()
 
       tmem2 = dnekclock()
@@ -752,7 +753,7 @@
 	istate = cudaMemcpy(d_bm1,bm1,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
         istate = cudaMemcpy(d_tcoef,tcoef,9,cudaMemcpyHosttoDevice)
         istate = cudaMemcpy(d_res1,res1,nelt*lx1*ly1*lz1*toteq, cudaMemcpyHosttoDevice)
-	
+
 	!-------------------------------
 	istate = cudaMemcpy(d_u,u,lelt*toteq*lx1*ly1*lz1,cudaMemcpyHosttoDevice)
 
@@ -762,10 +763,10 @@
       	istate = cudaMemcpy(d_vy,vy,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
       	istate = cudaMemcpy(d_vz,vz,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
       	istate = cudaMemcpy(d_pr,pr,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
-      	istate = cudaMemcpy(d_iface_flux,iface_flux,nelt*6*lx1*lz1,cudaMemcpyHosttoDevice)	
+      	istate = cudaMemcpy(d_iface_flux,iface_flux,nelt*6*lx1*lz1,cudaMemcpyHosttoDevice)
       endif
-      
-      
+
+
       tmem = dnekclock()
       !print *, 'copy time ',tmem-tmem2
 
@@ -777,6 +778,7 @@
 	 !print *,'nekcopy time ', dnekclock()-gtime
          gtime = dnekclock()
 	 call set_dealias_face
+
          !print *, 'dealias time: ', dnekclock()-gtime
 
 !     filter the conservative variables before start of each
@@ -787,7 +789,7 @@
                         d_vxd,d_vyd,d_vzd,d_u,d_jgl,d_jgt,d_w, lxd, &
                         lx1, nelt, toteq, irpu, irpv, &
                         irpw, irg, lwkd,0)
-	
+
 	 !print *, 'computeprimitive time: ',dnekclock()-gtime
          gtime = dnekclock()
          ntot = lx1*ly1*lz1*lelcmt*toteq
@@ -863,7 +865,7 @@
       		d_w,d_jacmi,d_bm1,d_usrf,d_d,d_dt,nelt,toteq,ndim,lwkd,nx1,lxd)
          !print *,'compute stage time:',dnekclock()-gtime
 	 gtime = dnekclock()
- 
+
 !         call compute_rhs_and_dt_gpu(d_vols(1,1,1,1,2),d_vols(1,1,1,1,3), &
 !              d_vols(1,1,1,1,4),d_vols(1,1,1,1,5),d_vols(1,1,1,1,1), &
 !              d_vxd,d_vyd,d_vzd,d_u,d_jgl, &
@@ -873,7 +875,7 @@
 !              d_jacmi,d_bm1,d_usrf,d_d,d_dt)
          call calculateuwrapper(d_u,d_bm1,d_tcoef,d_res3,d_res1,stage, nelt,nxyz1,toteq)
 	 !print *, 'calcu time:',dnekclock()-gtime
-      
+          call usr_particles_solver ! - cmtparticles.cuf
 	 !print *,tbeg3-tbeg2,tbeg4-tbeg3,tbeg5-tbeg4,tbeg6-tbeg4
 !         do e=1,nelt
 !            do eq=1,toteq
@@ -903,7 +905,7 @@
       subroutine nek_cmt_init
       include 'SIZE.cuf'
       include 'DG.cuf'
-      call get_shared_faces 
+      call get_shared_faces
       if (nio.eq.0) write(6,*)'Set up CMT-Nek'
       if (toteq.ne.5) then
          if (nio.eq.0) write(6,*)'toteq is low ! toteq = ',toteq
@@ -924,545 +926,6 @@
 
 
 !-------------------------------------------------------------------------------
-
-subroutine process_gpu_particles(d_xdrange,d_xerange,d_rpart,d_ipart,&
-                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
-                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
-
-      use cudafor
-      include 'SIZE.cuf'
-      include 'TSTEP.cuf'
-      include 'INPUT.cuf'
-      include 'MASS.cuf'
-      include 'SOLN.cuf'
-      include 'GEOM.cuf'
-      include 'CTIMER.cuf'
-      include 'CMTDATA.cuf'
-      include 'CMTTIMERS.cuf'
-      include 'DG.cuf'
-      include 'DEALIAS.cuf'
-
-      parameter (lr=16*ldim,li=5+6)
-      parameter (lrf=4+ldim,lif=5+5)
-      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
-
-      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 16*ndim
-      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
-      common  /iparti/ n,nr,ni
-
-      real, device :: d_xdrange(2,3)
-      real, device :: d_xerange(2,3,lelt)
-      real, device :: d_rpart(lr,lpart)
-      integer, device :: d_ipart(li,lpart)
-      integer, device :: d_fptsmap(lpart)
-      real, device :: d_rfpts(lrf,lpart)
-      integer, device :: d_ifpts(lif,lpart)
-      real, device :: d_vx(lx1,ly1,lz1,lelt)
-      real, device :: d_vy(lx1,ly1,lz1,lelt)
-      real, device :: d_vz(lx1,ly1,lz1,lelt)
-      real, device :: d_vxd(lxd,lyd,lzd,lelt)
-      real, device :: d_vyd(lxd,lyd,lzd,lelt)
-      real, device :: d_vzd(lxd,lyd,lzd,lelt)
-      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
-      real, device :: d_jgl(ldg)
-      real, device :: d_jgt(ldg)
-      real, device :: d_w(nelt*lwkd)
-
-      real    pt_timers(10), scrt_timers(10)
-      common /trackingtime/ pt_timers, scrt_timers
-
-      scrt_timers(1) = dnekclock()
-      !print *, "came here", nelt, lelt, istep
-      call stokes_particles2(d_xdrange,d_xerange,d_rpart,d_ipart,&
-                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
-                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
-      pt_timers(1) = pt_timers(1) + dnekclock() - scrt_timers(1)
-      ipttime = 10
-if(istep.eq.nsteps.or. &
-                (istep.gt.1.and.mod(istep,ipttime).eq.0))then
-         ptdum = glsum(ftime,1)
-         if(nid.eq.0) write(6,10)'flow solver time     ', ptdum &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(1),1)
-         if(nid.eq.0) write(6,10)'stokes_particles time', ptdum &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(2),1)
-         if(nid.eq.0) write(6,10)'init_stokes_ptls time', ptdum &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(3),1)
-         if(nid.eq.0) write(6,10)'updt_stokes_ptls time', ptdum &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(4),1)
-         if(nid.eq.0) write(6,10)'interp_u_for_adv time', ptdum &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(5),1)
-         if(nid.eq.0) write(6,10)'find_pts   time      ', ptdum  &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(6),1)
-         if(nid.eq.0) write(6,10)'crystal router time  ', ptdum &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(7),1)
-         if(nid.eq.0) write(6,10)'findpts_eval 3 time  ', ptdum &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(8),1)
-         if(nid.eq.0) write(6,10)'BDF3/EX2             ', ptdum &
-                , ptdum/istep
-         ptdum = glsum(pt_timers(9),1)
-         if(nid.eq.0) write(6,10)'locate remote part   ', ptdum &
-                , ptdum/istep
-      endif
-      ifxyo=.true.
-      if(istep.gt.1)ifxyo=.false.
-10    format(A21,1x,2(f14.7,1x))
-      return
-      end
-!-----------------------------------------------------------------------
-
-subroutine stokes_particles2(d_xdrange,d_xerange,d_rpart,d_ipart,&
-                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
-                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
-      use cudafor
-      include 'SIZE.cuf'
-      include 'TSTEP.cuf'
-      include 'INPUT.cuf'
-      include 'MASS.cuf'
-      include 'SOLN.cuf'
-      include 'GEOM.cuf'
-      include 'CTIMER.cuf'
-      include 'CMTDATA.cuf'
-      include 'CMTTIMERS.cuf'
-      include 'DG.cuf'
-      include 'DEALIAS.cuf'
-      include 'PARALLEL.cuf'
-
-      parameter (lr=16*ldim,li=5+6)
-      parameter (lrf=4+ldim,lif=5+5)
-      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
-
-      common  /cpartr/ rpart(lr,lpart) ! Minimal value of lr = 16*ndim
-      common  /cparti/ ipart(li,lpart) ! Minimal value of li = 5
-      common  /iparti/ n,nr,ni
-
-      real, device :: d_xdrange(2,3)
-      real, device :: d_xerange(2,3,lelt)
-      real, device :: d_rpart(lr,lpart)
-      integer, device :: d_ipart(li,lpart)
-      integer, device :: d_fptsmap(lpart)
-      real, device :: d_rfpts(lrf,lpart)
-      integer, device :: d_ifpts(lif,lpart)
-      real, device :: d_vx(lx1,ly1,lz1,lelt)
-      real, device :: d_vy(lx1,ly1,lz1,lelt)
-      real, device :: d_vz(lx1,ly1,lz1,lelt)
-      real, device :: d_vxd(lxd,lyd,lzd,lelt)
-      real, device :: d_vyd(lxd,lyd,lzd,lelt)
-      real, device :: d_vzd(lxd,lyd,lzd,lelt)
-      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
-      real, device :: d_jgl(ldg)
-      real, device :: d_jgt(ldg)
-      real, device :: d_w(nelt*lwkd)
-      real    pt_timers(10), scrt_timers(10)
-      common /trackingtime/ pt_timers, scrt_timers
-
-      !print *,'n,nr,ni,np',n,nr,ni,np
-      scrt_timers(3) = dnekclock()
-
-      print *, 'n: ', n, "call GPU update particles"
-      call update_stokes_particles_gpu2 (rpart,nr,ipart,ni,n,&
-                        d_xdrange,d_xerange,d_rpart,d_ipart,&
-                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
-                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt,d_w)
-!     print *, 'n: ', n, "end GPU update particles"
-      pt_timers(3) = pt_timers(3) + dnekclock() - scrt_timers(3)
-
-      return
-      end
-!-----------------------------------------------------------------------
-subroutine update_stokes_particles_gpu2(rpart,nr,ipart,ni,n,&
-                        d_xdrange,d_xerange,d_rpart,d_ipart,&
-                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
-                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
-      use cudafor
-      include 'SIZE.cuf'
-      !include 'TSTEP.cuf'
-      include 'INPUT.cuf'
-      include 'MASS.cuf'
-      include 'SOLN.cuf'
-      include 'GEOM.cuf'
-      include 'CTIMER.cuf'
-      include 'CMTDATA.cuf'
-      include 'CMTTIMERS.cuf'
-      include 'DG.cuf'
-      include 'DEALIAS.cuf'
-      include 'PARALLEL.cuf'
-
-      parameter (lr=16*ldim,li=5+6)
-      parameter (lrf=4+ldim,lif=5+5)
-      parameter (ldg=lxd**3,lwkd=2*lxd*lxd*lxd)
-
-      real, device :: d_xdrange(2,3)
-      real, device :: d_xerange(2,3,lelt)
-      real, device :: d_rpart(lr,lpart)
-      integer, device :: d_ipart(li,lpart)
-      integer, device :: d_fptsmap(lpart)
-      real, device :: d_rfpts(lrf,lpart)
-      integer, device :: d_ifpts(lif,lpart)
-      real, device :: d_vx(lx1,ly1,lz1,lelt)
-      real, device :: d_vy(lx1,ly1,lz1,lelt)
-      real, device :: d_vz(lx1,ly1,lz1,lelt)
-      real, device :: d_vxd(lxd,lyd,lzd,lelt)
-      real, device :: d_vyd(lxd,lyd,lzd,lelt)
-      real, device :: d_vzd(lxd,lyd,lzd,lelt)
-      real, device :: d_u(lx1,ly1,lz1,toteq,lelt)
-      real, device :: d_jgl(ldg)
-      real, device :: d_jgt(ldg)
-      real, device :: d_w(nelt*lwkd)
-      integer, device :: d_flagsend
-
-      integer flagsend, flagreceive   !used to inform all processor to stop when one particle move out of the domain
-
-
-      common /myparth/ i_fp_hndl, i_cr_hndl
-      common /myparts/ times(0:3),alpha(0:3),beta(0:3)
-      real    pt_timers(10), scrt_timers(10)
-      common /trackingtime/ pt_timers, scrt_timers
-
-      real    rpart(nr,n)
-      integer ipart(ni,n)
-
-      real  xdrange(2,3)
-      common /domainrange/ xdrange
-
-!     common /ptpointers/ jrc,jpt,je0,jps,jai,nai,jr,jd,jx,jy,jz,jx1  &
-!               ,jx2,jx3,jv0,jv1,jv2,jv3,ju0,ju1,ju2,ju3,jf0,jar,&
-!               jaa,jab,jac,jad,nar
-      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
-                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
-                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
-      COMMON /TSTEP1/ TIME,TIMEF,FINTIM,TIMEIO &
-                    ,DT,DTLAG(10),DTINIT,DTINVM,COURNO,CTARG &
-                    ,AB(10),BD(10),ABMSH(10) &
-                    ,AVDIFF(LDIMT1),AVTRAN(LDIMT1),VOLFLD(0:LDIMT1) &
-                    ,TOLREL,TOLABS,TOLHDF,TOLPDF,TOLEV,TOLNL,PRELAX &
-                    ,TOLPS,TOLHS,TOLHR,TOLHV,TOLHT(LDIMT1),TOLHE &
-                    ,VNRMH1,VNRMSM,VNRML2,VNRML8,VMEAN &
-                    ,TNRMH1(LDIMT),TNRMSM(LDIMT),TNRML2(LDIMT) &
-                    ,TNRML8(LDIMT),TMEAN(LDIMT)
-
-      jx0 = jx
-
-      flagsend = 0
-      flagreceive = 0
-
-      scrt_timers(8) = dnekclock()
-      call get_bdf_ext_coefs(beta,alpha,times)
-     
-      if(n.gt.0) then
-      istate = cudaMemcpy(rpart,d_rpart,nr*n, cudaMemcpyDevicetoHost)
-      istate = cudaMemcpy(ipart,d_ipart,ni*n, cudaMemcpyDevicetoHost)
-      istate = cudaMemcpy(d_flagsend, flagsend, 1, cudaMemcpyHosttoDevice)
-!     !for debug by keke
-!     print *,'before update wrapper, dt: ', DT, &
-!     do i = 1, n
-!        print *, 'gpu ipart: ', i, & !ipart(1,1), ipart(2,1), ipart(3,1),&
-!                        lglel(ipart(je0)+1) , rpart(jx, i), &
-!                        rpart(jy, i), rpart(jz, i), &
-!                        rpart(jy,i) + (1.0/3)*rpart(jy, i)*DT 
-!                        rpart(jy,i),& !  + rpart(jab,i) * rpart(jad,i), &
-!                        rpart(jz,i)   ! + rpart(jac,i) * rpart(jad,i)
-!     enddo
-!     !end debug added by keke
-
-      call updatestokeswrapper(d_rpart, alpha, beta, d_xdrange, ndim, nr  &
-                ,ni, n, jx0, jx1, jx2, jx3, jv0, jv1, jv2, jv3, ju0  &
-                ,ju1, ju2, ju3, jar, jf0, jaa, jab, jac, jad, d_flagsend, DT)
-
-      istate = cudaMemcpy(rpart,d_rpart,nr*n, cudaMemcpyDevicetoHost)
-      istate = cudaMemcpy(ipart,d_ipart,ni*n, cudaMemcpyDevicetoHost)
-      istate = cudaMemcpy(flagsend, d_flagsend, 1, cudaMemcpyDevicetoHost)
-
-!     !for debug by keke
-      print *,'after update wrapper, flagsend: ', flagsend, &
-         'gpu ipart: ', ipart(1,1), ipart(2,1), ipart(3,1),&
-                         lglel(ipart(je0)+1) 
-
-!     do i = 1, n
-!        write(*,*), i, ipart(je0, i), lglel(ipart(je0, i)+1), rpart(jx, i), &
-!                        rpart(jy, i), rpart(jz, i)
-!     enddo
-      !end debug added by keke
-      endif
-
-      call igop (flagsend, flagreceive, '+  ', 1)
-      if (flagreceive .ne. 0) then
-         call exitt
-      endif
-
-      pt_timers(8) = pt_timers(8) + dnekclock() - scrt_timers(8)
-
-!      call compute_primitive_vars_gpu
-      !print *,'before compute primitive wrapper'
-!      comp_time = dnekclock()
-      if(n.gt.0) then
-      call computeprimitivevarswrapper(d_vx, d_vy, d_vz, d_vxd,  &
-                d_vyd, d_vzd, d_u, d_jgl, d_jgt, d_w, lxd,  &
-                lx1, nelt, toteq, irpu, irpv,  &
-                irpw, irg, ldw,0)
-      endif
-      !print *, 'computeprimitive point force',dnekclock()-comp_time
-
-
-      call interp_u_for_adv2(rpart,nr,ipart,ni,n,ux,uy,uz,&
-                        d_rpart,d_ipart,d_fptsmap,d_rfpts,d_ifpts,d_xerange &
-                        ,d_vx,d_vy,d_vz)
-      !print *,'after interp'
-      return
-      end
-
-!-------------------------------------------------------------------
-      subroutine interp_u_for_adv2(rpart,nr,ipart,ni,n,ux,uy,uz,&
-                        d_rpart,d_ipart,d_fptsmap,d_rfpts,d_ifpts,d_xerange &
-                ,d_vx,d_vy,d_vz)
-      use cudafor
-      include 'SIZE.cuf'
-      include 'TSTEP.cuf'
-      include 'INPUT.cuf'
-      include 'MASS.cuf'
-      include 'SOLN.cuf'
-      include 'GEOM.cuf'
-      include 'CTIMER.cuf'
-      include 'CMTDATA.cuf'
-      include 'CMTTIMERS.cuf'
-      include 'DG.cuf'
-      include 'DEALIAS.cuf'
-      include 'PARALLEL.cuf'
-
-      common /myparth/ i_fp_hndl, i_cr_hndl
-
-      real    pt_timers(10), scrt_timers(10)
-      common /trackingtime/ pt_timers, scrt_timers
-
-      real    rpart(nr,n),ux(1),uy(1),uz(1)
-      integer ipart(ni,n)
-
-      parameter (lrf=4+ldim,lif=5+5)
-      real               rfpts(lrf,lpart)
-      common /fptspartr/ rfpts
-      integer            ifpts(lif,lpart),fptsmap(lpart)
-      common /fptsparti/ ifpts,fptsmap
-
-      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
-                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
-                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
-
-      real, device :: d_rpart(lr,lpart)
-      integer, device :: d_ipart(li,lpart)
-      integer, device :: d_fptsmap(lpart)
-      real, device :: d_rfpts(lrf,lpart)
-      integer, device :: d_ifpts(lif,lpart)
-      real, device :: d_xerange(2,3,lelt)
-      real, device :: d_vx(lx1,ly1,lz1,nelt)
-      real, device :: d_vy(lx1,ly1,lz1,nelt)
-      real, device :: d_vz(lx1,ly1,lz1,nelt)
-
-      integer icalld1
-      save    icalld1
-      data    icalld1 /0/
-
-      logical partl         ! This is a dummy placeholder, used in cr()
-      nl = 0                ! No logicals exchanged
-
-      scrt_timers(4) = dnekclock()
-      call interp_comm_part()
-      !print *, "done gpu adv"
-      scrt_timers(9) = dnekclock()
-
-      call particles_in_nid_gpu2(d_fptsmap,d_rfpts,lrf,d_ifpts,lif,nfpts,  &
-                d_rpart,nr,d_ipart,ni,n,d_xerange)
-!      nfpts = 0
-!      call particles_in_nid_wrapper(d_rfpts, d_ifpts, d_rpart,  &
-!                 d_ipart, d_xerange,  &
-!                 d_fptsmap, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
-!                jx, jy, jz, je0, jrc, jpt, jd, jr, nid)
- 
-      scrt_timers(5) = dnekclock()
-      !print *,'after part in nid',nfpts
-      if(nfpts.gt.0) then
-         istate = cudaMemcpy(ifpts,d_ifpts,lif*n, &
-                          cudaMemcpyDevicetoHost)
-         istate = cudaMemcpy(rfpts,d_rfpts,lrf*n, &
-                          cudaMemcpyDevicetoHost)
-         istate = cudaMemcpy(fptsmap,d_fptsmap,n, &
-                          cudaMemcpyDevicetoHost)
-      endif
-
-!     !for debug by keke
-!     print *,'after particles_in_nid, before findpts, nfpts is ', nfpts
-!     do i = 1, nfpts
-!        print *, i, 'ifpts(je0)', ifpts(je0, i)
-!     enddo
-!     !end debug added by keke
-
-      call findpts(i_fp_hndl  &
-                , ifpts(jrc,1),lif  &
-                , ifpts(jpt,1),lif  &
-                , ifpts(je0,1),lif  &
-                , rfpts(jr ,1),lrf  &
-                , rfpts(jd ,1),lrf  &
-                , rfpts(jx ,1),lrf  &
-                , rfpts(jy ,1),lrf  &
-                , rfpts(jz ,1),lrf ,nfpts)
-      scrt_timers(5) = dnekclock() - scrt_timers(5)
-      pt_timers(5) = scrt_timers(5) + pt_timers(5)
-
-!     !for debug by keke
-!     print *,'after findpts, before update_findpts_info'
-!     do i = 1, nfpts
-!        print *, i, 'ifpts(je0)', ifpts(je0, i)
-!     enddo
-!     !end debug added by keke
-
-nmax = iglmax(n,1)
-      if (nmax.gt.lpart) then
-         if (nid.eq.0) write(6,1) nmax,lpart
-    1    format('WARNING: Max number of particles:'  &
-                i9,'.  Not moving because lpart =',i9,'.')
-      else
-         scrt_timers(6) = dnekclock()
-	 !print *,'before copy', nr, ni, n
-         if(n.gt.0) then
-         istate = cudaMemcpy(rpart,d_rpart,nr*n, &
-                          cudaMemcpyDevicetoHost)
-         istate = cudaMemcpy(ipart,d_ipart,ni*n, &
-                          cudaMemcpyDevicetoHost)
-	 !print *, 'after copy'
-         endif
-         call update_findpts_info(rfpts,lrf  &
-                ,ifpts,lif,fptsmap,nfpts)
-         scrt_timers(9) = dnekclock() - scrt_timers(9) - scrt_timers(5)
-         pt_timers(9) = scrt_timers(9) + pt_timers(9)
-
-
-!     !for debug by keke
-!     print *,'after update_findpts_info, before tuple_transfer'
-!     do i = 1, n
-!        print *, i, 'ipart(je0)', ipart(je0, i)
-!     enddo
-!     !end debug added by keke
-
-         jps = jpid1-1     ! Pointer to temporary proc id for swapping
-         do i=1,n        ! Can't use jpt because it messes up particle info
-            ipart(jps,i) = ipart(jpt,i)
-         enddo
-
-         call crystal_tuple_transfer(i_cr_hndl,n,lpart  &
-                , ipart,ni,partl,nl,rpart,nr,jps)
-         call crystal_tuple_sort    (i_cr_hndl,n  &
-                , ipart,ni,partl,nl,rpart,nr,je0,1)
-         pt_timers(6) = pt_timers(6) + dnekclock() - scrt_timers(6)
-      endif
-
-!     !for debug by keke
-!     print *,'after tuple_transfer'
-!     do i = 1, n
-!        print *, i, 'ipart(je0)', ipart(je0, i)
-!     enddo
-!     !end debug added by keke
-!        added by keke
-         print *, 'gpu nid: ', nid, '# particles: ', n
-!        end added by keke
-
-      scrt_timers(7) = dnekclock()
-      if(n.gt.0) then
-      !print *,'before copy2', nr, n
-      istate = cudaMemcpy(d_rpart,rpart,nr*n,cudaMemcpyHosttoDevice)
-      !print *,'before copy2', ni, n
-      istate = cudaMemcpy(d_ipart,ipart,ni*n,cudaMemcpyHosttoDevice)
-      !print *,'before baryweights'
-      call baryweights_findpts_eval_gpu2(d_rpart,nr,d_ipart,ni,n, &
-                d_vx,d_vy,d_vz)
-      !print *,'after bary weights'
-      !print *, "done gpu interp"
-      endif
-      pt_timers(7) = pt_timers(7) + dnekclock() - scrt_timers(7)
-      pt_timers(4) = pt_timers(4) + dnekclock() - scrt_timers(4)
-      return
-      end
-
-!-------------------------------------------------------------------
-!     subroutine transferParticlesToGPU(rpart, ipart)
-!-------------------------------------------------------------------
-      subroutine particles_in_nid_gpu2(d_fptsmap,d_rfpts,nrf,d_ifpts,  &
-                nif,nfpts,d_rpart,nr,d_ipart,ni,n,d_xerange)
-      include 'SIZE.cuf'
-      include 'PARALLEL.cuf'
-
-!      real    rpart(nr,n)
-!      integer ipart(ni,n)
-!
-!      real    rfpts(nrf,*)
-!      integer ifpts(nif,*),fptsmap(*)
-
-!      real   xerange(2,3,lelt)
-!      common /elementrange/ xerange
-      real, device :: d_rpart(nr,lpart) !changed by keke from lr to nr
-      integer, device :: d_ipart(li,lpart) !same as up
-      integer, device :: d_fptsmap(lpart)
-      real, device :: d_rfpts(nrf,lpart) !same as up
-      integer, device :: d_ifpts(nif,lpart) !same as up
-      real, device :: d_xerange(2,3,lelt)
-
-      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
-                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
-                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
-
-      nfpts = 0
-      !print *, "came here"
-      !print *, nrf, nif, nfpts, nr, ni, n, lpart, nelt
-      if(n.gt.0) then
-      call particles_in_nid_wrapper(d_rfpts, d_ifpts, d_rpart,  &
-                 d_ipart, d_xerange,  &
-                 d_fptsmap, nrf, nif, nfpts, nr, ni, n, lpart, nelt,  &
-                jx, jy, jz, je0, jrc, jpt, jd, jr, nid)
-      endif
-      !print *, "finished came here"
-      return
-      end subroutine
-
-!-----------------------------------------------------------------------
-
-      subroutine baryweights_findpts_eval_gpu2(d_rpart,nr,d_ipart,ni,n, &
-                d_vx,d_vy,d_vz)
-      include 'SIZE.cuf'
-      include 'INPUT.cuf'
-      include 'SOLN.cuf'
-      include 'PARALLEL.cuf'
-
-      real    rpart(nr,n)
-      integer ipart(ni,n)
-      real, device :: d_rpart(nr,n)
-      integer, device :: d_ipart(ni,n)
-      real, device :: d_vx(lx1,ly1,lz1,nelt)
-      real, device :: d_vy(lx1,ly1,lz1,nelt)
-      real, device :: d_vz(lx1,ly1,lz1,nelt)
-
-      common /ptpointers/ jrc,jpt,je0,jps,jpid1,jpid2,jpid3,jpnn,jai &
-                    ,nai,jr,jd,jx,jy,jz,jx1,jx2,jx3,jv0,jv1,jv2,jv3 &
-                    ,ju0,ju1,ju2,ju3,jf0,jar,jaa,jab,jac,jad,nar,jpid
-
-      common /BARYPARAMS/ xgll, ygll, zgll, wxgll, wygll, wzgll
-      real xgll(lx1), ygll(ly1), zgll(lz1),  &
-                wxgll(lx1), wygll(ly1), wzgll(lz1)
-
-
-      common /BARRYREP/ rep, bot
-      real              rep(lx1,ly1,lz1), bot
-
-      call baryweights_evalwrapper(d_rpart, d_ipart, d_vx, d_vy, d_vz, rep,  &
-                xgll, ygll,zgll, wxgll, wygll, wzgll, jr,  &
-                je0, ju0, lx1, n, nr, ni, nelt)
-
-      return
-      end subroutine
 
 !-----------------------------------------------------------------------
       subroutine get_var_index(o_index, i_index)
@@ -1561,7 +1024,7 @@ nmax = iglmax(n,1)
       integer, device :: d_ipart(li,lpart)
       integer, device :: d_fptsmap(lpart)
       real, device :: d_rfpts(lrf,lpart)
-      integer, device :: d_ifpts(lif,lpart)	
+      integer, device :: d_ifpts(lif,lpart)
 
       real    pt_timers(10), scrt_timers(10)
       common /trackingtime/ pt_timers, scrt_timers
@@ -1624,7 +1087,7 @@ nmax = iglmax(n,1)
 
       if (isGPU) then !GPU
             npart_r = nw - (num_cores - 1) * param(71) * nw / (num_cores -1)
-            start_pid = nw - npart_r + 1 
+            start_pid = nw - npart_r + 1
             end_pid = nw
       else !CPU
             npart_r = 0.5 * nw / (num_cores -1)
