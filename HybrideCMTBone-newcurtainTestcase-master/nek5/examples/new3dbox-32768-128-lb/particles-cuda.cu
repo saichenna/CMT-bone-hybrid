@@ -28,7 +28,7 @@ double get_time( void )
     return t.tv_sec + t.tv_usec*1e-6;
 }
 
-__global__ void particles_in_nid(int *fptsmap, double *rfpts, int *ifpts, double *rpart, int *ipart, double *range, int nrf, int nif, int nfpts, int nr, int ni, int n, int lpart, int nelt, int jx, int jy, int jz,int je0, int jrc, int jpt, int jd, int jr, int nid){
+__global__ void particles_in_nid(double *rpart, int *ipart,double *rfpts, int *ifpts,int *ifptsmap, double *range, int n, int nr, int ni, int nrf, int nif, int nfpts, int nid, int lpart, int nelt, int jx, int jy, int jz,int je0, int jrc, int jpt, int jd, int jr){
     int id = blockIdx.x*blockDim.x+threadIdx.x;
     if(id < n){
         //double *rpart = rpart1 + id * nr;
@@ -57,7 +57,7 @@ __global__ void particles_in_nid(int *fptsmap, double *rfpts, int *ifpts, double
                 printf("error many moving particles\n");
                 return;
             }
-            fptsmap[nfpts] = id+1;
+            ifptsmap[nfpts] = id+1;
             //double * rfp = rfpts + old * nrf;
             //int * ifp = ifpts + old * nif;
             for(int i = 0 ; i < nrf; i++)
@@ -107,7 +107,7 @@ __global__ void update_particle_location(double *rpart1, double *xdrange1, int *
 }
 
 
-__global__ void interp_props_part_location(double *rpart, int *ipart, double *vx,double *vy,double *vz,double *t,double *vtrans,double *rep,double *xgll,double *ygll,double *zgll,double *wxgll,double *wygll,double *wzgll,int n, int nr, int ni, int nx1, int nx1r, int jr, int ju0, int je0, int jtemp, int jrho){
+__global__ void interp_props_part_location(double *rpart, int *ipart, double *vx,double *vy,double *vz,double *t,double *vtrans,double *xgll,double *ygll,double *zgll,double *wxgll,double *wygll,double *wzgll,int n, int nr, int ni, int nx1, int nx1r, int jr, int ju0, int je0, int jtemp, int jrho){
     int id = blockIdx.x*blockDim.x+threadIdx.x;
     if (id < n){
       double x,y,z;
@@ -117,6 +117,7 @@ __global__ void interp_props_part_location(double *rpart, int *ipart, double *vx
       double bwgtz[nx1];
       double bwgty[nx1];
       double bwgtx[nx1];
+      double rep[nx1*nx1*nx1];
       x = rpart[id*nr+jr];
       y = rpart[id*nr+jr+1];
       z = rpart[id*nr+jr+2];
@@ -235,7 +236,7 @@ __global__ void interp_props_part_location(double *rpart, int *ipart, double *vx
 
 //-----------------------------------------------------------
 
-__global__ void usr_particles_forces_bdf(double *rpart, int n, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd){
+__global__ void usr_particles_forces_bdf(double *rpart, int n, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd, double c_sound){
     int id = blockIdx.x*blockDim.x+threadIdx.x;
     if(id < n){
 //          int i = id/ndim;
@@ -253,7 +254,7 @@ __global__ void usr_particles_forces_bdf(double *rpart, int n, int nr,int jvol,i
           vvel[2] = rpart[id*nr+jv0+2];
           c0 = 120.0;
           T0 = 291.15;
-          c_sound = 1000000; //fix this at the host level so that no concurrency issues arise
+//          c_sound = 1000000; //fix this at the host level so that no concurrency issues arise
           rpart[id*nr+ja] = c_sound;
           mu_p = mu_0;
           vel_diff = sqrt(((uvel[0]-vvel[0])*(uvel[0]-vvel[0]))+((uvel[0]-vvel[0])*(uvel[1]-vvel[1]))+((uvel[2]-vvel[2])*(uvel[2]-vvel[2])));
@@ -277,7 +278,7 @@ __global__ void usr_particles_forces_bdf(double *rpart, int n, int nr,int jvol,i
 
 //---------------------------------------------------------------------------
 
-__global__ void usr_particles_forces_rk3(double *rpart, int n, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd){
+__global__ void usr_particles_forces_rk3(double *rpart, int n, int nr,int jvol,int jrhop, int jfusr, int jf0,int jrho,int jfqs,int ju0,int jv0, int ja, int jdp, int jre, int jtaup, int jcd, double c_sound){
     int id = blockIdx.x*blockDim.x+threadIdx.x;
     if(id < n){
 //          int i = id/ndim;
@@ -296,7 +297,7 @@ __global__ void usr_particles_forces_rk3(double *rpart, int n, int nr,int jvol,i
           vvel[2] = rpart[id*nr+jv0+2];
           c0 = 120.0;
           T0 = 291.15;
-          c_sound = 1000000; //fix this at the host level so that no concurrency issues arise
+//          c_sound = 1000000; //fix this at the host level so that no concurrency issues arise
           rpart[id*nr+ja] = c_sound;
           mu_p = mu_0;
           vel_diff = sqrt(((uvel[0]-vvel[0])*(uvel[0]-vvel[0]))+((uvel[0]-vvel[0])*(uvel[1]-vvel[1]))+((uvel[2]-vvel[2])*(uvel[2]-vvel[2])));
@@ -409,7 +410,7 @@ __global__ void update_vel_and_pos_rk3(double *rpart, double *kv_stage_p, double
 // }
 
 
-extern "C" void particles_in_nid_wrapper_(double *rpart, int *ipart, double *rfpts, int *ifpts, double *fptsmap, double *xerange, int *n, int *nr, int *ni, int *nrf, int *nif, int *nfpts, int *nid, int *lpart, int *nelt, int *jx, int *jy, int *jz,int *je0, int *jrc, int *jpt, int *jd, int *jr){
+extern "C" void particles_in_nid_wrapper_(double *rpart, int *ipart, double *rfpts, int *ifpts, double *ifptsmap, double *xerange, int *n, int *nr, int *ni, int *nrf, int *nif, int *nid, int *lpart, int *nelt, int *jx, int *jy, int *jz,int *je0, int *jrc, int *jpt, int *jd, int *jr){
 
     float time;
     cudaEvent_t startEvent, stopEvent;
@@ -419,12 +420,12 @@ extern "C" void particles_in_nid_wrapper_(double *rpart, int *ipart, double *rfp
 
     bool inCPU = false;
     double *d_rfpts, *d_rpart, *d_xerange;
-    int *d_fptsmap, *d_ifpts, *d_ipart, *d_nfpts;
+    int *d_ifptsmap, *d_ifpts, *d_ipart, *d_nfpts;
     if(inCPU){
         cudaMalloc(&d_rfpts, lpart[0]*nrf[0]*sizeof(double));
         cudaMalloc(&d_rpart, n[0]*nr[0]*sizeof(double));
         cudaMalloc(&d_xerange, nelt[0]*6*sizeof(double));
-        cudaMalloc(&d_fptsmap, lpart[0]*sizeof(int));
+        cudaMalloc(&d_ifptsmap, lpart[0]*sizeof(int));
         cudaMalloc(&d_ifpts, lpart[0]*nif[0]*sizeof(int));
         cudaMalloc(&d_ipart, n[0]*ni[0]*sizeof(int));
 
@@ -444,7 +445,7 @@ extern "C" void particles_in_nid_wrapper_(double *rpart, int *ipart, double *rfp
         d_rfpts = rfpts;
         d_rpart= rpart;
         d_xerange = xerange;
-        d_fptsmap = fptsmap;
+        d_ifptsmap = ifptsmap;
         d_ifpts = ifpts;
         d_ipart = ipart;
         cudaMalloc(&d_nfpts, sizeof(int));
@@ -454,14 +455,14 @@ extern "C" void particles_in_nid_wrapper_(double *rpart, int *ipart, double *rfp
     int blockSize = 1024, gridSize;
     gridSize = (int)ceil((float)n[0]/blockSize);
     // printf ("print var %d %d %d\n", n[0], jx[0], jy[0]);
-    particles_in_nid<<<gridSize, blockSize>>>(d_rpart, d_ipart, d_rfpts, d_ifpts, d_fptsmap, d_xerange, n[0], nr[0], ni[0], nrf[0], nif[0], d_nfpts, nid[0], lpart[0], nelt[0], jx[0], jy[0], jz[0], je0[0], jrc[0], jpt[0], jd[0], jr[0]);
+    particles_in_nid<<<gridSize, blockSize>>>(d_rpart, d_ipart, d_rfpts, d_ifpts, d_ifptsmap, d_xerange, n[0], nr[0], ni[0], nrf[0], nif[0], d_nfpts, nid[0], lpart[0], nelt[0], jx[0], jy[0], jz[0], je0[0], jrc[0], jpt[0], jd[0], jr[0]);
     if(inCPU){
         cudaMemcpy(ipart, d_ipart, n[0]*ni[0]*sizeof(int), cudaMemcpyDeviceToHost);
         cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
         cudaMemcpy(nfpts, d_nfpts, sizeof(int), cudaMemcpyDeviceToHost);
 
         if(nfpts[0]>0){
-            cudaMemcpy(fptsmap, d_fptsmap, nfpts[0]*sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(fptsmap, d_ifptsmap, nfpts[0]*sizeof(int), cudaMemcpyDeviceToHost);
             cudaMemcpy(rfpts, d_rfpts, nfpts[0]*nrf[0]*sizeof(double), cudaMemcpyDeviceToHost);
             cudaMemcpy(ifpts, d_ifpts, nfpts[0]*nif[0]*sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -470,14 +471,14 @@ extern "C" void particles_in_nid_wrapper_(double *rpart, int *ipart, double *rfp
 	      cudaFree(d_rpart);
         cudaFree(d_ipart);
         cudaFree(d_xerange);
-        cudaFree(d_fptsmap);
+        cudaFree(d_ifptsmap);
         cudaFree(d_rfpts);
         cudaFree(d_ifpts);
     }
     else{
         cudaMemcpy(nfpts, d_nfpts, sizeof(int), cudaMemcpyDeviceToHost);
 //        if(nfpts[0]>0){
-//            cudaMemcpy(fptsmap, d_fptsmap, nfpts[0]*sizeof(int), cudaMemcpyDeviceToHost);
+//            cudaMemcpy(fptsmap, d_ifptsmap, nfpts[0]*sizeof(int), cudaMemcpyDeviceToHost);
 //            cudaMemcpy(rfpts, d_rfpts, nfpts[0]*nrf[0]*sizeof(double), cudaMemcpyDeviceToHost);
 //            cudaMemcpy(ifpts, d_ifpts, nfpts[0]*nif[0]*sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -512,7 +513,7 @@ extern "C" void update_particle_location_wrapper_(double *rpart, double *xdrange
         cudaMalloc(&d_in_part, n[0]*sizeof(int));
         cudaMalloc(&d_bc_part, 6*sizeof(int));
         cudaMemcpy(d_rpart, rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyHostToDevice);
-        cudaMemcpy(d_xerange, xerange, nelt[0]*6*sizeof(double), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_xdrange, xdrange, 6*sizeof(double), cudaMemcpyHostToDevice);
         cudaMemcpy(d_in_part, in_part, n[0]*sizeof(int), cudaMemcpyHostToDevice);
         cudaMemcpy(d_bc_part, bc_part, 6*sizeof(int), cudaMemcpyHostToDevice);
 
@@ -549,7 +550,7 @@ extern "C" void update_particle_location_wrapper_(double *rpart, double *xdrange
   else{
 //      cudaMemcpy(in_part, d_in_part, n[0]*sizeof(int), cudaMemcpyDeviceToHost);
 //        if(nfpts[0]>0){
-//            cudaMemcpy(fptsmap, d_fptsmap, nfpts[0]*sizeof(int), cudaMemcpyDeviceToHost);
+//            cudaMemcpy(fptsmap, d_ifptsmap, nfpts[0]*sizeof(int), cudaMemcpyDeviceToHost);
 //            cudaMemcpy(rfpts, d_rfpts, nfpts[0]*nrf[0]*sizeof(double), cudaMemcpyDeviceToHost);
 //            cudaMemcpy(ifpts, d_ifpts, nfpts[0]*nif[0]*sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -565,7 +566,7 @@ extern "C" void update_particle_location_wrapper_(double *rpart, double *xdrange
 
 }
 
-extern "C" void interp_props_part_location_wrapper_(double *rpart,int *ipart,double *vx, double *vy, double *vz,double *t, double *vtrans, double *rep, double *xgll, double *ygll, double *zgll, double *wxgll, double *wygll, double *wzgll, int* n, int* nr, int* ni, int* nx1, int* nx1r, int* jr,int* ju0,int* je0,int* jtemp,int* jrho,int* nelt){
+extern "C" void interp_props_part_location_wrapper_(double *rpart,int *ipart,double *vx, double *vy, double *vz,double *t, double *vtrans, double *xgll, double *ygll, double *zgll, double *wxgll, double *wygll, double *wzgll, int* n, int* nr, int* ni, int* nx1, int* nx1r, int* jr,int* ju0,int* je0,int* jtemp,int* jrho,int* nelt){
 
     float time;
     cudaEvent_t startEvent, stopEvent;
@@ -634,7 +635,7 @@ extern "C" void interp_props_part_location_wrapper_(double *rpart,int *ipart,dou
   }
   int blockSize = 1024, gridSize;
   gridSize = (int)ceil((float)n[0]/blockSize);
-  interp_props_part_location<<<gridSize, blockSize>>>(d_rpart,d_vx,d_vy,d_vz,d_t,d_vtrans,d_rep,d_xgll,d_ygll,d_zgll,d_wxgll,d_wygll,d_wzgll,n[0],nr[0],ni[0],nx1[0],nx1r[0],jr[0],ju0[0],je0[0],jtemp[0],jrho[0]);
+  interp_props_part_location<<<gridSize, blockSize>>>(d_rpart,d_vx,d_vy,d_vz,d_t,d_vtrans,d_xgll,d_ygll,d_zgll,d_wxgll,d_wygll,d_wzgll,n[0],nr[0],ni[0],nx1[0],nx1r[0],jr[0],ju0[0],je0[0],jtemp[0],jrho[0]);
   if(inCPU){
       cudaMemcpy(ipart, d_ipart, n[0]*ni[0]*sizeof(int), cudaMemcpyDeviceToHost);
       cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
@@ -688,7 +689,7 @@ extern "C" void interp_props_part_location_wrapper_(double *rpart,int *ipart,dou
   }
 
  //---------------------------------------------------------------------------
- extern "C" void usr_particles_forces_bdf_wrapper_(double *rpart, int *n, int* nr,int* jvol,int* jrhop, int* jfusr, int* jf0,int* jrho,int* jfqs,int* ju0,int* jv0, int* ja, int* jdp, int* jre, int* jtaup, int* jcd){
+ extern "C" void usr_particles_forces_bdf_wrapper_(double *rpart, int *n, int* nr,int* jvol,int* jrhop, int* jfusr, int* jf0,int* jrho,int* jfqs,int* ju0,int* jv0, int* ja, int* jdp, int* jre, int* jtaup, int* jcd, double* c_sound){
 
      float time;
      cudaEvent_t startEvent, stopEvent;
@@ -707,7 +708,7 @@ extern "C" void interp_props_part_location_wrapper_(double *rpart,int *ipart,dou
      }
      int blockSize = 1024, gridSize;
      gridSize = (int)ceil((float)n[0]/blockSize);
-     usr_particles_forces_bdf<<<gridSize, blockSize>>>(d_rpart,n[0],nr[0],jvol[0],jrhop[0],jfusr[0],jf0[0],jrho[0],jfqs[0],ju0[0],jv0[0],ja[0],jdp[0],jre[0],jtaup[0],jcd[0]);
+     usr_particles_forces_bdf<<<gridSize, blockSize>>>(d_rpart,n[0],nr[0],jvol[0],jrhop[0],jfusr[0],jf0[0],jrho[0],jfqs[0],ju0[0],jv0[0],ja[0],jdp[0],jre[0],jtaup[0],jcd[0],c_sound[0]);
      if(inCPU){
          cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
          //free
@@ -723,7 +724,7 @@ extern "C" void interp_props_part_location_wrapper_(double *rpart,int *ipart,dou
 //---------------------------------------------------------
 
 //---------------------------------------------------------------------------
-extern "C" void usr_particles_forces_rk3_wrapper_(double *rpart, int* n, int* nr, int* jvol,int* jrhop, int* jfusr, int* jf0,int* jrho,int* jfqs,int* ju0,int* jv0, int* ja, int* jdp, int* jre, int* jtaup, int* jcd){
+extern "C" void usr_particles_forces_rk3_wrapper_(double *rpart, int* n, int* nr, int* jvol,int* jrhop, int* jfusr, int* jf0,int* jrho,int* jfqs,int* ju0,int* jv0, int* ja, int* jdp, int* jre, int* jtaup, int* jcd, double* c_sound){
 
     float time;
     cudaEvent_t startEvent, stopEvent;
@@ -742,7 +743,7 @@ extern "C" void usr_particles_forces_rk3_wrapper_(double *rpart, int* n, int* nr
     }
     int blockSize = 1024, gridSize;
     gridSize = (int)ceil((float)n[0]/blockSize);
-    usr_particles_forces_rk3<<<gridSize, blockSize>>>(d_rpart,n[0],nr[0],jvol[0],jrhop[0],jfusr[0],jf0[0],jrho[0],jfqs[0],ju0[0],jv0[0],ja[0],jdp[0],jre[0],jtaup[0],jcd[0]);
+    usr_particles_forces_rk3<<<gridSize, blockSize>>>(d_rpart,n[0],nr[0],jvol[0],jrhop[0],jfusr[0],jf0[0],jrho[0],jfqs[0],ju0[0],jv0[0],ja[0],jdp[0],jre[0],jtaup[0],jcd[0],c_sound[0]);
     if(inCPU){
         cudaMemcpy(rpart, d_rpart, n[0]*nr[0]*sizeof(double), cudaMemcpyDeviceToHost);
         //free

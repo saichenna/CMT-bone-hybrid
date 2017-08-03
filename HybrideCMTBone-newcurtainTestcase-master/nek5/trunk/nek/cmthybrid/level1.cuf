@@ -112,6 +112,25 @@
       real, device :: d_cbc(lx1,lz1)
       real, device :: d_all(lelt*6*lxd*lzd,26)
       real, device :: d_jaco_c(lelt*6*lx1*lz1)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      real, device :: d_kv_stage_p(llpart,4,ldim)
+      real, device :: d_kx_stage_p(llpart,4,ldim)
+      real, device :: d_alpha(0:3)
+      real, device :: d_beta(0:3)
+      integer, device :: d_bc_part(6)
+      real, device :: d_xgll(lx1)
+      real, device :: d_ygll(lx1)
+      real, device :: d_zgll(lx1)
+      real, device :: d_wxgll(lx1)
+      real, device :: d_wygll(lx1)
+      real, device :: d_wzgll(lx1)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)
+      integer, device :: d_ifptsmap(lpart)
+      real, device :: d_xerange(2,3,lelt)
+      integer, device :: d_xdrange(2,3)
+
 
 !------------------------------------------------------------
 !     the following is the copy of the previous to keep original one before change
@@ -200,7 +219,12 @@
                         d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
                         d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
                         d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
-                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c          &
+                        d_rpart,d_ipart,d_kv_stage_p,d_kx_stage_p, &
+                        d_alpha, d_beta, d_bc_part, d_xgll,        &
+                        d_ygll,d_zgll,d_wxgll,d_wygll, d_wzgll,    &
+                        d_rfpts, d_ifpts,d_ifptsmap, d_xerange,    &
+                        d_xdrange)
 !         call process_gpu_particles(d_xdrange,d_xerange,d_rpart,d_ipart,&
 !                        d_fptsmap,d_rfpts,d_ifpts,d_vx,d_vy,&
 !                        d_vz,d_vxd,d_vyd,d_vzd,d_u, d_jgl, d_jgt, d_w)
@@ -409,7 +433,12 @@
                         d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
                         d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
                         d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
-                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c          &
+                        d_rpart,d_ipart,d_kv_stage_p,d_kx_stage_p, &
+                        d_alpha, d_beta, d_bc_part, d_xgll,        &
+                        d_ygll,d_zgll,d_wxgll,d_wygll, d_wzgll,    &
+                        d_rfpts, d_ifpts,d_ifptsmap, d_xerange,    &
+                        d_xdrange)
 
       use cudafor
       include 'SIZE.cuf'
@@ -472,6 +501,25 @@
       real, device :: d_cbc(lx1,lz1)
       real, device :: d_all(nelt*6*lxd*lzd,26)
       real, device :: d_jaco_c(nelt*6*lx1*lz1)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      real, device :: d_kv_stage_p(llpart,4,ldim)
+      real, device :: d_kx_stage_p(llpart,4,ldim)
+      real, device :: d_alpha(0:3)
+      real, device :: d_beta(0:3)
+      integer, device :: d_bc_part(6)
+      real, device :: d_xgll(lx1)
+      real, device :: d_ygll(lx1)
+      real, device :: d_zgll(lx1)
+      real, device :: d_wxgll(lx1)
+      real, device :: d_wygll(lx1)
+      real, device :: d_wzgll(lx1)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)
+      integer, device :: d_ifptsmap(lpart)
+      real, device :: d_xerange(2,3,lelt)
+      integer, device :: d_xdrange(2,3)
+
       do i=1,msteps
          istep = istep+i
          call nek_advance_gpu(d_res3,d_u,d_res1,&
@@ -480,7 +528,12 @@
                         d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
                         d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
                         d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
-                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c          &
+                        d_rpart,d_ipart,d_kv_stage_p,d_kx_stage_p, &
+                        d_alpha, d_beta, d_bc_part, d_xgll,        &
+                        d_ygll,d_zgll,d_wxgll,d_wygll, d_wzgll,    &
+                        d_rfpts, d_ifpts,d_ifptsmap, d_xerange,    &
+                        d_xdrange)
 
          if (ifneknek) call userchk_set_xfer
          if (ifneknek) call bcopy
@@ -497,7 +550,13 @@
                         d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
                         d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
                         d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
-                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c          &
+                        d_rpart,d_ipart,d_kv_stage_p,d_kx_stage_p, &
+                        d_alpha, d_beta, d_bc_part, d_xgll,        &
+                        d_ygll,d_zgll,d_wxgll,d_wygll, d_wzgll,    &
+                        d_rfpts, d_ifpts,d_ifptsmap, d_xerange,    &
+                        d_xdrange)
+
 
       include 'SIZE.cuf'
       include 'INPUT.cuf'
@@ -561,6 +620,26 @@
       real, device :: d_cbc(lx1,lz1)
       real, device :: d_all(nelt*6*lxd*lzd,26)
       real, device :: d_jaco_c(nelt*6*lx1*lz1)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      real, device :: d_kv_stage_p(llpart,4,ldim)
+      real, device :: d_kx_stage_p(llpart,4,ldim)
+      real, device :: d_alpha(0:3)
+      real, device :: d_beta(0:3)
+      integer, device :: d_bc_part(6)
+      real, device :: d_xgll(lx1)
+      real, device :: d_ygll(lx1)
+      real, device :: d_zgll(lx1)
+      real, device :: d_wxgll(lx1)
+      real, device :: d_wygll(lx1)
+      real, device :: d_wzgll(lx1)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)
+      integer, device :: d_ifptsmap(lpart)
+      real, device :: d_xerange(2,3,lelt)
+      integer, device :: d_xdrange(2,3)
+
+
       call nekgsync
       if (iftran) call settime
       if (ifmhd ) call cfl_check
@@ -576,7 +655,12 @@
                         d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
                         d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
                         d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
-                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c          &
+                        d_rpart,d_ipart,d_kv_stage_p,d_kx_stage_p, &
+                        d_alpha, d_beta, d_bc_part, d_xgll,        &
+                        d_ygll,d_zgll,d_wxgll,d_wygll, d_wzgll,    &
+                        d_rfpts, d_ifpts,d_ifptsmap, d_xerange,    &
+                        d_xdrange)
          !print *,'cmt nek time is ',dnekclock()-cmtime
          return
       endif
@@ -638,7 +722,12 @@
                         d_area,d_phig,d_iface_flux,d_totalh,d_ur,&
                         d_us,d_ut,d_ud,d_tu,d_rx,d_dg,d_dgt,d_d,&
                         d_dt,d_jacmi,d_usrf,d_wghtc,d_wghtf,d_unx,&
-                        d_uny,d_unz,d_cbc,d_all,d_jaco_c)
+                        d_uny,d_unz,d_cbc,d_all,d_jaco_c           &
+                        d_rpart,d_ipart,d_kv_stage_p,d_kx_stage_p, &
+                        d_alpha, d_beta, d_bc_part, d_xgll,        &
+                        d_ygll,d_zgll,d_wxgll,d_wygll, d_wzgll,    &
+                        d_rfpts, d_ifpts,d_ifptsmap, d_xerange,    &
+                        d_xdrange)
 !
 !     Solve the Euler equations
 
@@ -712,6 +801,24 @@
       real, device :: d_cbc(lx1,lz1)
       real, device :: d_all(nelt*6*lxd*lzd,26)
       real, device :: d_jaco_c(nelt*6*lx1*lz1)
+      real, device :: d_rpart(lr,lpart)
+      integer, device :: d_ipart(li,lpart)
+      real, device :: d_kv_stage_p(llpart,4,ldim)
+      real, device :: d_kx_stage_p(llpart,4,ldim)
+      real, device :: d_alpha(0:3)
+      real, device :: d_beta(0:3)
+      integer, device :: d_bc_part(6)
+      real, device :: d_xgll(lx1)
+      real, device :: d_ygll(lx1)
+      real, device :: d_zgll(lx1)
+      real, device :: d_wxgll(lx1)
+      real, device :: d_wygll(lx1)
+      real, device :: d_wzgll(lx1)
+      real, device :: d_rfpts(lrf,lpart)
+      integer, device :: d_ifpts(lif,lpart)
+      integer, device :: d_ifptsmap(lpart)
+      real, device :: d_xerange(2,3,lelt)
+      integer, device :: d_xdrange(2,3)
 
       real cpu_array(10*num_sh*lx1*lx1)
       Integer i, ii
@@ -720,7 +827,6 @@
       starttime = dnekclock()
       if(istep.eq.1) call set_tstep_coef !- level2.txt
       if(istep.eq.1) call cmt_flow_ics(ifrestart) !- level2.txt
-      if(istep.eq.1) call usr_particles_init !- cmtparticles.cuf
       tmem1 = dnekclock()
 
       tmem2 = dnekclock()
@@ -764,11 +870,18 @@
       	istate = cudaMemcpy(d_vz,vz,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
       	istate = cudaMemcpy(d_pr,pr,nelt*lx1*ly1*lz1, cudaMemcpyHosttoDevice)
       	istate = cudaMemcpy(d_iface_flux,iface_flux,nelt*6*lx1*lz1,cudaMemcpyHosttoDevice)
+
       endif
 
 
       tmem = dnekclock()
       !print *, 'copy time ',tmem-tmem2
+
+
+      if(istep.eq.1) call usr_particles_init(d_rpart,d_ipart,  &
+           d_kv_stage_p,d_kx_stage_p,d_bc_part, d_xgll, d_ygll,   &
+           d_zgll, d_wxgll,d_wygll, d_wzgll, d_rfpts,        &
+           d_ifpts,d_ifptsmap,d_xerange,d_xdrange) !- cmtparticles.cuf
 
       nstage = 3
       do stage=1,nstage
@@ -875,7 +988,10 @@
 !              d_jacmi,d_bm1,d_usrf,d_d,d_dt)
          call calculateuwrapper(d_u,d_bm1,d_tcoef,d_res3,d_res1,stage, nelt,nxyz1,toteq)
 	 !print *, 'calcu time:',dnekclock()-gtime
-          call usr_particles_solver ! - cmtparticles.cuf
+          call usr_particles_solver(d_rpart,d_ipart,d_kv_stage_p, &
+             d_kx_stage_p, d_alpha, d_beta, d_bc_part, d_xgll,    &
+             d_ygll,d_zgll, d_wxgll, d_wygll, d_wzgll, d_rfpts,   &
+             d_ifpts,d_ifptsmap, d_xerange, d_xdrange)     ! - cmtparticles.cuf
 	 !print *,tbeg3-tbeg2,tbeg4-tbeg3,tbeg5-tbeg4,tbeg6-tbeg4
 !         do e=1,nelt
 !            do eq=1,toteq
